@@ -169,6 +169,14 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_shared_ns ON shared_memory(namespace);
     """)
+
+    # Migrate existing agents table — add columns that v0.1.0 didn't have
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+    for col, typedef in [("description", "TEXT"), ("capabilities", "TEXT"), ("public", "INTEGER DEFAULT 0")]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
+
+    conn.commit()
     conn.close()
 
 init_db()
