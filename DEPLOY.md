@@ -3,25 +3,19 @@
 ## 1. SSH into your VPS
 
 ```bash
-ssh root@YOUR_VPS_IP
+ssh root@82.180.139.113
 ```
 
 ## 2. Install dependencies
 
 ```bash
-apt update && apt install -y python3 python3-pip python3-venv git nginx certbot python3-certbot-nginx
+apt update && apt install -y python3 python3-pip python3-venv git nginx
 ```
 
-## 3. Upload the project
+## 3. Clone the project
 
-Option A — from your local machine (run this locally, not on VPS):
 ```bash
-scp -r agentforge/ root@YOUR_VPS_IP:/opt/agentforge
-```
-
-Option B — clone from GitHub (if you push it first):
-```bash
-git clone https://github.com/YOUR_USERNAME/agentforge.git /opt/agentforge
+git clone https://github.com/D0NMEGA/agentforge.git /opt/agentforge
 ```
 
 ## 4. Set up Python environment
@@ -36,8 +30,9 @@ pip install -r requirements.txt
 ## 5. Test it works
 
 ```bash
+cd /opt/agentforge
 source venv/bin/activate
-uvicorn api.main:app --host 127.0.0.1 --port 8000
+uvicorn main:app --host 127.0.0.1 --port 8000
 # In another terminal: curl http://127.0.0.1:8000/v1/health
 # You should see {"status":"operational",...}
 # Ctrl+C to stop
@@ -56,7 +51,7 @@ Type=simple
 User=root
 WorkingDirectory=/opt/agentforge
 Environment=PATH=/opt/agentforge/venv/bin:/usr/bin
-ExecStart=/opt/agentforge/venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8000 --workers 2
+ExecStart=/opt/agentforge/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --workers 2
 Restart=always
 RestartSec=5
 
@@ -70,15 +65,13 @@ systemctl start agentforge
 systemctl status agentforge
 ```
 
-## 7. Set up Nginx reverse proxy
-
-Replace `yourdomain.com` with your actual domain (or use your VPS IP).
+## 7. Set up Nginx reverse proxy (with WebSocket support)
 
 ```bash
 cat > /etc/nginx/sites-available/agentforge << 'EOF'
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name _;
 
     # Landing page
     location / {
@@ -86,13 +79,18 @@ server {
         try_files /landing.html =404;
     }
 
-    # API
+    # API endpoints
     location /v1/ {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_read_timeout 30s;
+        proxy_read_timeout 300s;
+
+        # WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 
     # Swagger docs
@@ -112,24 +110,32 @@ rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl restart nginx
 ```
 
-## 8. (Optional) Add HTTPS with Let's Encrypt
-
-Only if you have a domain pointed to your VPS:
+## 8. Verify everything works
 
 ```bash
-certbot --nginx -d yourdomain.com
-```
-
-## 9. Verify everything works
-
-```bash
-# From anywhere:
-curl http://YOUR_VPS_IP/v1/health
+# Health check:
+curl http://82.180.139.113/v1/health
 
 # Register an agent:
-curl -X POST http://YOUR_VPS_IP/v1/register \
+curl -X POST http://82.180.139.113/v1/register \
   -H "Content-Type: application/json" \
   -d '{"name": "first-bot"}'
+
+# Check the directory:
+curl http://82.180.139.113/v1/directory
+```
+
+---
+
+## Updating after code changes (use this every time)
+
+```bash
+cd /opt/agentforge
+git pull origin main
+source venv/bin/activate
+pip install -r requirements.txt
+systemctl restart agentforge
+systemctl status agentforge
 ```
 
 ## Quick reference commands
@@ -138,14 +144,18 @@ curl -X POST http://YOUR_VPS_IP/v1/register \
 # Check status
 systemctl status agentforge
 
-# View logs
+# View logs (live tail)
 journalctl -u agentforge -f
+
+# View last 50 log lines
+journalctl -u agentforge -n 50
 
 # Restart after code changes
 systemctl restart agentforge
 
 # Check nginx logs
 tail -f /var/log/nginx/access.log
+tail -f /var/log/nginx/error.log
 ```
 
 ## Firewall (if needed)

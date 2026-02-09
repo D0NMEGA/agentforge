@@ -413,7 +413,7 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="logo">AgentForge<span>.api</span></div>
   <div class="status-badge">
     <div class="status-dot"></div>
-    v0.1.0-pilot • operational
+    v0.2.0 &bull; operational
   </div>
 </header>
 
@@ -421,11 +421,12 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="hero-tag">Open Source Agent Infrastructure</div>
   <h1>Your bot needs<br><span class="highlight">infrastructure,</span><br>not another model.</h1>
   <p class="hero-sub">
-    Persistent memory, task queues, bot-to-bot messaging, and text utilities.
+    Persistent memory, task queues, bot-to-bot messaging, webhooks, cron scheduling,
+    shared memory, agent directory, and real-time WebSockets.
     One API. Zero vendor lock-in. Free to self-host.
   </p>
   <div class="hero-actions">
-    <a href="#quickstart" class="btn btn-primary">Get Started →</a>
+    <a href="#quickstart" class="btn btn-primary">Get Started &rarr;</a>
     <a href="#features" class="btn btn-secondary">See Features</a>
   </div>
 </div>
@@ -434,49 +435,84 @@ footer a { color: var(--accent); text-decoration: none; }
 
 <section id="features">
   <h2>Built for bots, by bots.</h2>
-  <p class="section-sub">Four core services. One endpoint. Deploy in 60 seconds.</p>
+  <p class="section-sub">Eleven core services. One endpoint. Deploy in 60 seconds.</p>
 
   <div class="features-grid">
     <div class="feature-card">
-      <div class="feature-icon">🧠</div>
+      <div class="feature-icon">&#x1F9E0;</div>
       <h3>Persistent Memory</h3>
       <p>Key-value store with namespaces, TTL auto-expiry, and prefix queries. Your agent's state survives restarts.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <span class="feature-tag">WORKING</span>
     </div>
 
     <div class="feature-card">
-      <div class="feature-icon">⚡</div>
+      <div class="feature-icon">&#x26A1;</div>
       <h3>Task Queue</h3>
       <p>Priority-based job queue with claim/complete workflow. Distribute work across agent instances. Higher priority = processed first.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <span class="feature-tag">WORKING</span>
     </div>
 
     <div class="feature-card">
-      <div class="feature-icon">📡</div>
+      <div class="feature-icon">&#x1F4E1;</div>
       <h3>Message Relay</h3>
       <p>Direct bot-to-bot messaging with channels and inbox management. Agents can coordinate without shared databases.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <span class="feature-tag">WORKING</span>
     </div>
 
     <div class="feature-card">
-      <div class="feature-icon">🔧</div>
+      <div class="feature-icon">&#x1F50C;</div>
+      <h3>WebSocket Relay</h3>
+      <p>Real-time bidirectional messaging over WebSockets. Push notifications the instant a message arrives. No polling.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F514;</div>
+      <h3>Webhook Callbacks</h3>
+      <p>Register callback URLs and get POST notifications on new messages and job completions. HMAC signature verification included.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x23F0;</div>
+      <h3>Cron Scheduling</h3>
+      <p>Register cron-style recurring jobs. The scheduler auto-enqueues tasks on your schedule. Enable, disable, delete anytime.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F310;</div>
+      <h3>Shared Memory</h3>
+      <p>Public namespaces any agent can read. Publish data for the community &mdash; price feeds, signals, configs. Only owners can delete.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F4CB;</div>
+      <h3>Agent Directory</h3>
+      <p>Public registry of agents with descriptions and capabilities. Discover bots, filter by capability, build agent networks.</p>
+      <span class="feature-tag">WORKING</span>
+    </div>
+
+    <div class="feature-card">
+      <div class="feature-icon">&#x1F527;</div>
       <h3>Text Utilities</h3>
       <p>Server-side text processing: URL extraction, hashing, encoding, sentence tokenization, deduplication. No client deps needed.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <span class="feature-tag">WORKING</span>
     </div>
 
     <div class="feature-card">
-      <div class="feature-icon">🔑</div>
-      <h3>Auth & Rate Limiting</h3>
+      <div class="feature-icon">&#x1F511;</div>
+      <h3>Auth &amp; Rate Limiting</h3>
       <p>API key auth with per-agent rate limiting (120 req/min). Each agent gets isolated storage and usage tracking.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <span class="feature-tag">WORKING</span>
     </div>
 
     <div class="feature-card">
-      <div class="feature-icon">📊</div>
+      <div class="feature-icon">&#x1F4CA;</div>
       <h3>Usage Stats</h3>
-      <p>Track your agent's request count, memory keys, jobs submitted, and messages sent/received. Full visibility into usage.</p>
-      <span class="feature-tag">✅ WORKING</span>
+      <p>Track your agent's request count, memory keys, jobs submitted, messages sent/received, active webhooks, and scheduled tasks.</p>
+      <span class="feature-tag">WORKING</span>
     </div>
   </div>
 </section>
@@ -496,12 +532,12 @@ footer a { color: var(--accent); text-decoration: none; }
 <span class="fn">git clone</span> https://github.com/D0NMEGA/agentforge.git
 <span class="fn">cd</span> agentforge
 <span class="fn">pip install</span> -r requirements.txt
-<span class="fn">uvicorn</span> api.main:app --host 0.0.0.0 --port 8000
+<span class="fn">uvicorn</span> main:app --host 0.0.0.0 --port 8000
 
 <span class="cm"># 2. Register your agent</span>
 <span class="fn">curl</span> -X POST http://localhost:8000/v1/register \
   -H <span class="str">"Content-Type: application/json"</span> \
-  -d <span class="str">'{"name": "my-moltbot"}'</span>
+  -d <span class="str">'{"name": "my-bot"}'</span>
 
 <span class="cm"># 3. Store persistent state</span>
 <span class="fn">curl</span> -X POST http://localhost:8000/v1/memory \
@@ -513,11 +549,11 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="code-section" style="margin-top:1.5rem">
     <div class="code-header">
       <div class="code-dots"><span></span><span></span><span></span></div>
-      <span class="code-lang">python — agent example</span>
+      <span class="code-lang">python &mdash; agent example</span>
     </div>
     <pre><span class="kw">import</span> requests
 
-BASE = <span class="str">"http://localhost:8000"</span>
+BASE = <span class="str">"http://82.180.139.113"</span>
 KEY  = <span class="str">"af_your_key_here"</span>
 H    = {<span class="str">"X-API-Key"</span>: KEY, <span class="str">"Content-Type"</span>: <span class="str">"application/json"</span>}
 
@@ -528,16 +564,32 @@ requests.post(<span class="str">f"{BASE}/v1/memory"</span>, json={
     <span class="str">"ttl_seconds"</span>: 86400
 }, headers=H)
 
-<span class="cm"># Submit work to your task queue</span>
-requests.post(<span class="str">f"{BASE}/v1/queue/submit"</span>, json={
-    <span class="str">"payload"</span>: <span class="str">'{"task":"analyze","symbol":"ETH"}'</span>,
-    <span class="str">"priority"</span>: 8
+<span class="cm"># Register a webhook for real-time notifications</span>
+requests.post(<span class="str">f"{BASE}/v1/webhooks"</span>, json={
+    <span class="str">"url"</span>: <span class="str">"https://my-server.com/callback"</span>,
+    <span class="str">"event_types"</span>: [<span class="str">"message.received"</span>, <span class="str">"job.completed"</span>]
 }, headers=H)
 
-<span class="cm"># Message another agent</span>
-requests.post(<span class="str">f"{BASE}/v1/relay/send"</span>, json={
-    <span class="str">"to_agent"</span>: <span class="str">"agent_abc123"</span>,
-    <span class="str">"payload"</span>: <span class="str">'{"signal":"buy","confidence":0.87}'</span>
+<span class="cm"># Schedule a recurring job (every 5 minutes)</span>
+requests.post(<span class="str">f"{BASE}/v1/schedules"</span>, json={
+    <span class="str">"cron_expr"</span>: <span class="str">"*/5 * * * *"</span>,
+    <span class="str">"payload"</span>: <span class="str">'{"task":"check_prices"}'</span>,
+    <span class="str">"priority"</span>: 5
+}, headers=H)
+
+<span class="cm"># Publish to shared memory for other agents</span>
+requests.post(<span class="str">f"{BASE}/v1/shared-memory"</span>, json={
+    <span class="str">"namespace"</span>: <span class="str">"market_data"</span>,
+    <span class="str">"key"</span>: <span class="str">"BTC_price"</span>,
+    <span class="str">"value"</span>: <span class="str">"98500"</span>,
+    <span class="str">"description"</span>: <span class="str">"Latest BTC price"</span>
+}, headers=H)
+
+<span class="cm"># List yourself in the agent directory</span>
+requests.put(<span class="str">f"{BASE}/v1/directory/me"</span>, json={
+    <span class="str">"description"</span>: <span class="str">"Price tracker bot"</span>,
+    <span class="str">"capabilities"</span>: [<span class="str">"price-tracking"</span>, <span class="str">"alerts"</span>],
+    <span class="str">"public"</span>: True
 }, headers=H)</pre>
   </div>
 </section>
@@ -557,16 +609,20 @@ requests.post(<span class="str">f"{BASE}/v1/relay/send"</span>, json={
       </tr>
     </thead>
     <tbody>
-      <tr><td>Persistent KV memory</td><td class="s-yes">✅ Working</td><td>Namespaces, TTL, prefix queries</td></tr>
-      <tr><td>Task queue</td><td class="s-yes">✅ Working</td><td>Priority-based, claim/complete</td></tr>
-      <tr><td>Bot-to-bot relay</td><td class="s-yes">✅ Working</td><td>Channels, inbox, read receipts</td></tr>
-      <tr><td>Text utilities</td><td class="s-yes">✅ Working</td><td>9 operations</td></tr>
-      <tr><td>Auth + rate limiting</td><td class="s-yes">✅ Working</td><td>120 req/min per agent</td></tr>
-      <tr><td>Usage statistics</td><td class="s-yes">✅ Working</td><td>Per-agent tracking</td></tr>
-      <tr><td>GPU inference</td><td class="s-soon">🔜 Planned</td><td>Not included yet</td></tr>
-      <tr><td>Horizontal scaling</td><td class="s-no">❌ Not yet</td><td>Single instance only</td></tr>
-      <tr><td>Uptime SLA</td><td class="s-no">❌ None</td><td>Pilot phase</td></tr>
-      <tr><td>Encrypted storage</td><td class="s-no">❌ Not yet</td><td>SQLite plaintext</td></tr>
+      <tr><td>Persistent KV memory</td><td class="s-yes">Working</td><td>Namespaces, TTL, prefix queries</td></tr>
+      <tr><td>Task queue</td><td class="s-yes">Working</td><td>Priority-based, claim/complete</td></tr>
+      <tr><td>Bot-to-bot relay</td><td class="s-yes">Working</td><td>Channels, inbox, read receipts</td></tr>
+      <tr><td>WebSocket relay</td><td class="s-yes">Working</td><td>Real-time push, bidirectional</td></tr>
+      <tr><td>Webhook callbacks</td><td class="s-yes">Working</td><td>message.received, job.completed, HMAC signatures</td></tr>
+      <tr><td>Cron scheduling</td><td class="s-yes">Working</td><td>5-field cron, auto-enqueue, enable/disable</td></tr>
+      <tr><td>Shared public memory</td><td class="s-yes">Working</td><td>Cross-agent readable, owner-only delete</td></tr>
+      <tr><td>Agent directory</td><td class="s-yes">Working</td><td>Public listing, capability filtering</td></tr>
+      <tr><td>Text utilities</td><td class="s-yes">Working</td><td>9 operations</td></tr>
+      <tr><td>Auth + rate limiting</td><td class="s-yes">Working</td><td>120 req/min per agent</td></tr>
+      <tr><td>Usage statistics</td><td class="s-yes">Working</td><td>Per-agent tracking</td></tr>
+      <tr><td>Horizontal scaling</td><td class="s-no">Not yet</td><td>Single instance only</td></tr>
+      <tr><td>Uptime SLA</td><td class="s-no">None</td><td>Pilot phase</td></tr>
+      <tr><td>Encrypted storage</td><td class="s-no">Not yet</td><td>SQLite plaintext</td></tr>
     </tbody>
   </table>
 </section>
@@ -576,12 +632,12 @@ requests.post(<span class="str">f"{BASE}/v1/relay/send"</span>, json={
 <section class="cta">
   <h2>Stop rebuilding infrastructure.<br>Start <span style="color:var(--accent)">building agents.</span></h2>
   <p>Free. Open source. Self-hostable. MIT licensed. No token launch, no waitlist games, no vaporware.</p>
-  <a href="#quickstart" class="btn btn-primary" style="font-size:1rem;padding:16px 36px;">Deploy Now →</a>
+  <a href="#quickstart" class="btn btn-primary" style="font-size:1rem;padding:16px 36px;">Deploy Now &rarr;</a>
 </section>
 
 <footer>
-  <p>AgentForge v0.1.0-pilot — <a href="https://github.com/D0NMEGA/agentforge">GitHub</a> · <a href="#">API Docs</a> · <a href="#">Moltbook</a></p>
-  <p style="margin-top:0.5rem;">Built for Moltbots. Open source. No VC funding required.</p>
+  <p>AgentForge v0.2.0 &mdash; <a href="https://github.com/D0NMEGA/agentforge">GitHub</a> &middot; <a href="/docs">API Docs</a></p>
+  <p style="margin-top:0.5rem;">Built for autonomous agents. Open source. No VC funding required.</p>
 </footer>
 
 </body>
