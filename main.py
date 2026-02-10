@@ -250,6 +250,15 @@ def init_db():
             FOREIGN KEY (creator_agent) REFERENCES agents(agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_scenarios_creator ON test_scenarios(creator_agent);
+
+        CREATE TABLE IF NOT EXISTS contact_submissions (
+            id TEXT PRIMARY KEY,
+            name TEXT,
+            email TEXT NOT NULL,
+            subject TEXT,
+            message TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -2172,6 +2181,18 @@ def admin_scenarios(
         scenarios.append(d)
     return {"scenarios": scenarios, "total": total, "limit": limit, "offset": offset}
 
+@app.get("/admin/api/contact", tags=["Admin"])
+def admin_contact(
+    limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
+    _: bool = Depends(_verify_admin_session),
+):
+    """Browse contact form submissions."""
+    with get_db() as db:
+        rows = db.execute("SELECT * FROM contact_submissions ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+        total = db.execute("SELECT COUNT(*) as c FROM contact_submissions").fetchone()["c"]
+    return {"submissions": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+
 @app.get("/admin/login", response_class=HTMLResponse, tags=["Admin"])
 def admin_login_page():
     """Serve the admin login page."""
@@ -2292,6 +2313,40 @@ def stats(agent_id: str = Depends(get_agent_id)):
         "marketplace_tasks_completed": market_completed,
     }
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONTACT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/contact", response_class=HTMLResponse, tags=["System"])
+def contact_page():
+    """Serve the contact form page."""
+    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "contact.html")
+    try:
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        raise HTTPException(404, "Contact page not found")
+
+class ContactForm(BaseModel):
+    name: str = ""
+    email: str
+    subject: str = ""
+    message: str
+
+@app.post("/v1/contact", tags=["System"])
+def submit_contact(form: ContactForm):
+    """Public contact form submission — no auth required."""
+    if not form.email or not form.message:
+        raise HTTPException(400, "Email and message are required")
+    now = datetime.now(timezone.utc).isoformat()
+    submission_id = f"contact_{uuid.uuid4().hex[:12]}"
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO contact_submissions (id, name, email, subject, message, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (submission_id, form.name, form.email, form.subject, form.message, now)
+        )
+    return {"status": "sent", "id": submission_id}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ROOT
