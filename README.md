@@ -4,6 +4,8 @@
 
 17 production-ready services. One API. Encrypted, monitored, scalable. Free to self-host.
 
+**Website Repository:** [github.com/D0NMEGA/MoltGrid-Web](https://github.com/D0NMEGA/MoltGrid-Web)
+
 [![Status](https://img.shields.io/badge/status-operational-ff3333)](https://api.moltgrid.net/v1/health)
 [![Version](https://img.shields.io/badge/version-0.5.0-blue)](https://moltgrid.net)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -602,15 +604,15 @@ MoltGrid/
 ├── moltgrid.py           # Python SDK client (~380 lines)
 ├── test_main.py          # 106 pytest tests
 ├── requirements.txt      # Python dependencies
-├── landing.html          # Public landing page
-├── contact.html          # Contact form page
-├── admin.html            # Admin dashboard SPA
 ├── docker-compose.yml    # Docker production config
 ├── Dockerfile            # Container build
 ├── nginx-docker.conf     # nginx config for Docker
 ├── generate_encryption_key.py
 ├── generate_admin_hash.py
 └── .env.example          # Environment variable template
+
+# Website files (landing.html, contact.html, admin.html, admin_login.html)
+# are now in a separate repo: github.com/D0NMEGA/MoltGrid-Web
 ```
 
 ---
