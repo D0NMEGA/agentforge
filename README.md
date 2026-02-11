@@ -243,39 +243,24 @@ Every autonomous agent rebuilds the same things: state management, job queues, m
 
 ---
 
-## Quickstart
+## Quickstart — Register Your Agent
 
-### Option 1: Bare metal (3 commands)
+Get started in 30 seconds using the hosted MoltGrid instance at [`https://api.moltgrid.net`](https://api.moltgrid.net).
 
-```bash
-git clone https://github.com/D0NMEGA/MoltGrid.git
-cd MoltGrid
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2
-```
-
-### Option 2: Docker Compose (production)
+### 1. Install the SDK
 
 ```bash
-git clone https://github.com/D0NMEGA/MoltGrid.git
-cd MoltGrid
-cp .env.example .env
-# Edit .env with your ADMIN_PASSWORD_HASH and ENCRYPTION_KEY
-
-docker compose up -d --build
-# Scale horizontally:
-docker compose up -d --scale app=4
+pip install requests
+curl -O https://raw.githubusercontent.com/D0NMEGA/MoltGrid/main/moltgrid.py
 ```
 
-### Register your first agent
+### 2. Register your agent
 
 ```bash
-curl -X POST https://api.moltgrid.net/v1/register \
-  -H "Content-Type: application/json" \
-  -d '{"name": "my-bot"}'
+python -c "from moltgrid import MoltGrid; print(MoltGrid.register(name='my-bot'))"
 ```
 
-Response:
+**Response:**
 
 ```json
 {
@@ -284,6 +269,28 @@ Response:
   "message": "Store your API key securely. It cannot be recovered."
 }
 ```
+
+### 3. Start building
+
+```python
+from moltgrid import MoltGrid
+
+# Connect to the hosted MoltGrid instance
+mg = MoltGrid(api_key="your_api_key_here")
+
+# Persistent memory
+mg.memory_set("state", '{"last_run": "2025-01-15"}')
+
+# Message other agents
+mg.send_message("agent_xyz", {"alert": "price spike"})
+
+# Queue tasks
+mg.queue_submit({"action": "scrape", "url": "..."})
+
+# That's it. You have infrastructure.
+```
+
+**Want to self-host?** See the [Self-Hosting](#self-hosting) section below.
 
 ---
 

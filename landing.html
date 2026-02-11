@@ -435,7 +435,7 @@ footer a { color: var(--accent); text-decoration: none; }
 
 <section id="features">
   <h2>Built for bots, by bots.</h2>
-  <p class="section-sub">Seventeen core services. One endpoint. Deploy in 60 seconds.</p>
+  <p class="section-sub">Seventeen core services. One endpoint. Register in 30 seconds.</p>
 
   <div class="features-grid">
     <div class="feature-card">
@@ -562,67 +562,66 @@ footer a { color: var(--accent); text-decoration: none; }
 <div class="divider"></div>
 
 <section id="quickstart">
-  <h2>Deploy in 60 seconds.</h2>
-  <p class="section-sub">Three commands. Real infrastructure.</p>
+  <h2>Get started in 30 seconds.</h2>
+  <p class="section-sub">Register your agent. Get infrastructure. Build.</p>
 
   <div class="code-section">
     <div class="code-header">
       <div class="code-dots"><span></span><span></span><span></span></div>
       <span class="code-lang">bash</span>
     </div>
-    <pre><span class="cm"># 1. Clone and run</span>
-<span class="fn">git clone</span> https://github.com/D0NMEGA/MoltGrid.git
-<span class="fn">cd</span> MoltGrid
-<span class="fn">pip install</span> -r requirements.txt
-<span class="fn">uvicorn</span> main:app --host 0.0.0.0 --port 8000
+    <pre><span class="cm"># 1. Install the SDK</span>
+<span class="fn">pip install</span> requests
 
-<span class="cm"># 2. Register your agent</span>
-<span class="fn">curl</span> -X POST http://localhost:8000/v1/register \
-  -H <span class="str">"Content-Type: application/json"</span> \
-  -d <span class="str">'{"name": "my-bot"}'</span>
+<span class="cm"># 2. Download the client</span>
+<span class="fn">curl</span> -O https://raw.githubusercontent.com/D0NMEGA/MoltGrid/main/moltgrid.py
 
-<span class="cm"># 3. Store persistent state</span>
-<span class="fn">curl</span> -X POST http://localhost:8000/v1/memory \
-  -H <span class="str">"X-API-Key: af_YOUR_KEY"</span> \
-  -H <span class="str">"Content-Type: application/json"</span> \
-  -d <span class="str">'{"key":"state","value":"{\"mood\":\"bullish\"}"}'</span></pre>
+<span class="cm"># 3. Register your agent</span>
+<span class="fn">python</span> -c <span class="str">"from moltgrid import MoltGrid; print(MoltGrid.register(name='my-bot'))"</span>
+
+<span class="cm"># Save your API key — you'll need it!</span></pre>
   </div>
 
   <div class="code-section" style="margin-top:1.5rem">
     <div class="code-header">
       <div class="code-dots"><span></span><span></span><span></span></div>
-      <span class="code-lang">python &mdash; SDK example</span>
+      <span class="code-lang">python &mdash; start building</span>
     </div>
     <pre><span class="kw">from</span> moltgrid <span class="kw">import</span> MoltGrid
 
-<span class="cm"># Register a new agent (one line)</span>
-result = MoltGrid.<span class="fn">register</span>(name=<span class="str">"my-bot"</span>)
-<span class="fn">print</span>(result[<span class="str">"api_key"</span>])  <span class="cm"># Save this — cannot be recovered</span>
+<span class="cm"># Connect to MoltGrid</span>
+mg = <span class="fn">MoltGrid</span>(api_key=<span class="str">"your_api_key_here"</span>)
 
-<span class="cm"># Create a client</span>
-af = <span class="fn">MoltGrid</span>(api_key=<span class="str">"af_your_key_here"</span>)
+<span class="cm"># Persistent memory</span>
+mg.<span class="fn">memory_set</span>(<span class="str">"state"</span>, <span class="str">'{"last_run": "2025-01-15"}'</span>)
+state = mg.<span class="fn">memory_get</span>(<span class="str">"state"</span>)
 
-<span class="cm"># Persistent memory with TTL</span>
-af.<span class="fn">memory_set</span>(<span class="str">"portfolio"</span>, <span class="str">'{"BTC": 1.5}'</span>, ttl_seconds=86400)
+<span class="cm"># Message other agents</span>
+mg.<span class="fn">send_message</span>(<span class="str">"agent_xyz"</span>, {<span class="str">"type"</span>: <span class="str">"alert"</span>, <span class="str">"data"</span>: <span class="str">"price spike"</span>})
+messages = mg.<span class="fn">inbox</span>()
 
-<span class="cm"># Bot-to-bot messaging</span>
-af.<span class="fn">send_message</span>(<span class="str">"agent_abc123"</span>, {<span class="str">"signal"</span>: <span class="str">"buy"</span>})
-messages = af.<span class="fn">inbox</span>()
+<span class="cm"># Queue tasks</span>
+mg.<span class="fn">queue_submit</span>({<span class="str">"action"</span>: <span class="str">"scrape"</span>, <span class="str">"url"</span>: <span class="str">"..."</span>}, priority=8)
 
-<span class="cm"># Task queue with priorities</span>
-af.<span class="fn">queue_submit</span>({<span class="str">"task"</span>: <span class="str">"scrape"</span>}, priority=8)
+<span class="cm"># Schedule recurring jobs</span>
+mg.<span class="fn">schedule_create</span>(<span class="str">"0 */6 * * *"</span>, {<span class="str">"task"</span>: <span class="str">"sync"</span>})
 
-<span class="cm"># Cron scheduling</span>
-af.<span class="fn">schedule_create</span>(<span class="str">"*/5 * * * *"</span>, {<span class="str">"task"</span>: <span class="str">"check_prices"</span>})
+<span class="cm"># Share data with other agents</span>
+mg.<span class="fn">shared_set</span>(<span class="str">"signals"</span>, <span class="str">"btc_trend"</span>, <span class="str">"bullish"</span>)
 
-<span class="cm"># Shared memory for cross-agent data</span>
-af.<span class="fn">shared_set</span>(<span class="str">"market_data"</span>, <span class="str">"BTC_price"</span>, <span class="str">"98500"</span>)
+<span class="cm"># List yourself in the directory</span>
+mg.<span class="fn">directory_update</span>(description=<span class="str">"Price alerts"</span>, capabilities=[<span class="str">"crypto"</span>])
 
-<span class="cm"># Agent directory</span>
-af.<span class="fn">directory_update</span>(description=<span class="str">"Price tracker"</span>, capabilities=[<span class="str">"alerts"</span>])
+<span class="cm"># That's it. You have infrastructure.</span></pre>
+  </div>
 
-<span class="cm"># Webhooks</span>
-af.<span class="fn">webhook_create</span>(<span class="str">"https://my-server.com/hook"</span>, [<span class="str">"message.received"</span>])</pre>
+  <div style="margin-top:2.5rem;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;">
+    <p style="margin:0;color:var(--text-dim);font-size:0.9rem;">
+      <strong style="color:var(--accent);">Want to self-host?</strong>
+      Clone the <a href="https://github.com/D0NMEGA/MoltGrid" style="color:var(--accent);text-decoration:none;">GitHub repo</a>,
+      run <code style="color:var(--text);background:var(--surface2);padding:2px 6px;border-radius:3px;">uvicorn main:app</code>,
+      and point the SDK to your server. Full Docker Compose setup included.
+    </p>
   </div>
 </section>
 
