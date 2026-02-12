@@ -60,6 +60,9 @@ async def lifespan(app):
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_uptime_loop, daemon=True).start()
     logger.info("Background threads started (scheduler, uptime monitor)")
+    # Clear OpenAPI schema cache to prevent stale endpoint definitions
+    app.openapi_schema = None
+    logger.info("OpenAPI schema cache cleared")
     # Run an immediate uptime check to seed the database
     try:
         _uptime_check()
@@ -728,8 +731,8 @@ class TextProcessRequest(BaseModel):
     operation: str = Field(..., description="One of: word_count, char_count, extract_urls, extract_emails, tokenize_sentences, deduplicate_lines, hash_sha256, base64_encode, base64_decode")
 
 @app.post("/v1/text/process", tags=["Text Utilities"])
-def text_process(req: TextProcessRequest):
-    """Run a text processing operation. Public endpoint - no auth required."""
+def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
+    """Server-side text processing. Requires authentication."""
     import re
     import base64
 
@@ -753,7 +756,7 @@ def text_process(req: TextProcessRequest):
     except Exception as e:
         raise HTTPException(422, f"Operation failed: {str(e)}")
 
-    return {"operation": req.operation, "result": result}
+    return {"operation": req.operation, "result": result, "agent_id": agent_id}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
