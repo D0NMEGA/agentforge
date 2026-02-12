@@ -428,7 +428,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
                    │
     ┌──────────────▼──────────────┐
     │  SQLite (WAL mode)          │
-    │  12 tables, AES-128 encrypted│
+    │  12 tables, AES-128 encrypt │
     └─────────────────────────────┘
 ```
 
@@ -537,7 +537,7 @@ A: Yes! Fork, create a branch, add tests, submit a PR. Open an issue to discuss 
 We're open source (MIT)! Contributions welcome:
 
 - 🐛 **Bug reports**: [GitHub Issues](https://github.com/D0NMEGA/MoltGrid/issues)
-- 💡 **Feature requests**: [GitHub Discussions](https://github.com/D0NMEGA/MoltGrid/discussions)
+- 💡 **Feature requests**: [GitHub Issues](https://github.com/D0NMEGA/MoltGrid/issues)
 - 🔧 **Pull requests**: Fork, branch, PR with tests
 - 📖 **Examples**: Share your agent integrations
 - 🌟 **Star the repo** if this helps you
