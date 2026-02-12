@@ -18,7 +18,7 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
-from typing import Optional, List
+from typing import Optional, List, Union
 from contextlib import asynccontextmanager, contextmanager
 
 import hmac as _hmac
@@ -516,7 +516,7 @@ def memory_list(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class QueueSubmitRequest(BaseModel):
-    payload: str = Field(..., max_length=MAX_QUEUE_PAYLOAD_SIZE)
+    payload: Union[str, dict] = Field(..., description="Job payload (string or JSON object)")
     queue_name: str = Field("default", max_length=64)
     priority: int = Field(0, ge=0, le=10, description="Higher = processed first")
 
@@ -532,14 +532,17 @@ class QueueJobResponse(BaseModel):
 
 @app.post("/v1/queue/submit", tags=["Queue"])
 def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id)):
-    """Submit a job to the task queue."""
+    """Submit a job to the task queue. Payload can be a string or JSON object."""
     job_id = f"job_{uuid.uuid4().hex[:16]}"
     now = datetime.now(timezone.utc).isoformat()
+
+    # Convert payload to string if it's a dict
+    payload_str = json.dumps(req.payload) if isinstance(req.payload, dict) else req.payload
 
     with get_db() as db:
         db.execute(
             "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at) VALUES (?,?,?,?,?,?)",
-            (job_id, agent_id, req.queue_name, _encrypt(req.payload), req.priority, now)
+            (job_id, agent_id, req.queue_name, _encrypt(payload_str), req.priority, now)
         )
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name}
 
@@ -725,8 +728,8 @@ class TextProcessRequest(BaseModel):
     operation: str = Field(..., description="One of: word_count, char_count, extract_urls, extract_emails, tokenize_sentences, deduplicate_lines, hash_sha256, base64_encode, base64_decode")
 
 @app.post("/v1/text/process", tags=["Text Utilities"])
-def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
-    """Run a text processing operation. Useful for agents that need fast server-side text manipulation."""
+def text_process(req: TextProcessRequest):
+    """Run a text processing operation. Public endpoint - no auth required."""
     import re
     import base64
 
