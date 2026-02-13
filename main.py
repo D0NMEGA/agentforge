@@ -588,6 +588,31 @@ def queue_submit(req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id))
         )
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name, "max_attempts": req.max_attempts}
 
+@app.get("/v1/queue/dead_letter", tags=["Queue"])
+def queue_dead_letter_list(
+    queue_name: Optional[str] = None,
+    limit: int = Query(20, le=100),
+    offset: int = Query(0, ge=0),
+    agent_id: str = Depends(get_agent_id)
+):
+    """List dead-letter jobs for the authenticated agent."""
+    with get_db() as db:
+        if queue_name:
+            rows = db.execute(
+                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
+                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
+                "WHERE agent_id=? AND queue_name=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
+                (agent_id, queue_name, limit, offset)
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
+                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
+                "WHERE agent_id=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
+                (agent_id, limit, offset)
+            ).fetchall()
+    return {"jobs": [dict(r) for r in rows], "count": len(rows)}
+
 @app.get("/v1/queue/{job_id}", response_model=QueueJobResponse, tags=["Queue"])
 def queue_status(job_id: str, agent_id: str = Depends(get_agent_id)):
     """Check job status."""
@@ -712,31 +737,6 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
             )
             return {"job_id": job_id, "status": "pending_retry", "attempts": attempt,
                     "max_attempts": max_att, "next_retry_at": next_retry}
-
-@app.get("/v1/queue/dead_letter", tags=["Queue"])
-def queue_dead_letter_list(
-    queue_name: Optional[str] = None,
-    limit: int = Query(20, le=100),
-    offset: int = Query(0, ge=0),
-    agent_id: str = Depends(get_agent_id)
-):
-    """List dead-letter jobs for the authenticated agent."""
-    with get_db() as db:
-        if queue_name:
-            rows = db.execute(
-                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
-                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
-                "WHERE agent_id=? AND queue_name=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
-                (agent_id, queue_name, limit, offset)
-            ).fetchall()
-        else:
-            rows = db.execute(
-                "SELECT job_id, queue_name, priority, attempt_count, max_attempts, "
-                "fail_reason, created_at, failed_at, moved_at FROM dead_letter "
-                "WHERE agent_id=? ORDER BY moved_at DESC LIMIT ? OFFSET ?",
-                (agent_id, limit, offset)
-            ).fetchall()
-    return {"jobs": [dict(r) for r in rows], "count": len(rows)}
 
 @app.post("/v1/queue/{job_id}/replay", tags=["Queue"])
 def queue_replay(job_id: str, agent_id: str = Depends(get_agent_id)):
