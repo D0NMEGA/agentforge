@@ -237,8 +237,8 @@ class TestQueue:
         _, _, h1 = register_agent("agent1")
         _, _, h2 = register_agent("agent2")
         
-        # Agent1 submits and claims a job
-        r = client.post("/v1/queue/submit", json={"payload": "agent1 work"}, headers=h1)
+        # Agent1 submits and claims a job with max_attempts=2 for retry
+        r = client.post("/v1/queue/submit", json={"payload": "agent1 work", "max_attempts": 2}, headers=h1)
         job_id = r.json()["job_id"]
         client.post("/v1/queue/claim", headers=h1)
         
@@ -250,6 +250,7 @@ class TestQueue:
         # Agent1 can fail their own job
         fail_resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "error"}, headers=h1)
         assert fail_resp.status_code == 200
+        assert fail_resp.json()["status"] == "pending_retry"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
