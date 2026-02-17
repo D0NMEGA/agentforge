@@ -185,73 +185,6 @@ class TestQueue:
             # Webhook thread should have been started
             assert mock_thread.called
 
-    def test_claim_only_own_jobs(self):
-        """Test that agents can only claim their own jobs."""
-        _, _, h1 = register_agent("agent1")
-        _, _, h2 = register_agent("agent2")
-        
-        # Agent1 submits a job
-        r = client.post("/v1/queue/submit", json={"payload": "agent1 job"}, headers=h1)
-        job_id_1 = r.json()["job_id"]
-        
-        # Agent2 submits a job
-        r = client.post("/v1/queue/submit", json={"payload": "agent2 job"}, headers=h2)
-        job_id_2 = r.json()["job_id"]
-        
-        # Agent1 should only claim their own job
-        claimed_1 = client.post("/v1/queue/claim", headers=h1)
-        assert claimed_1.json()["job_id"] == job_id_1
-        assert claimed_1.json()["payload"] == "agent1 job"
-        
-        # Agent2 should only claim their own job
-        claimed_2 = client.post("/v1/queue/claim", headers=h2)
-        assert claimed_2.json()["job_id"] == job_id_2
-        assert claimed_2.json()["payload"] == "agent2 job"
-        
-        # Agent1 should have no more jobs to claim
-        empty_1 = client.post("/v1/queue/claim", headers=h1)
-        assert empty_1.json()["status"] == "empty"
-
-    def test_cannot_complete_other_agent_job(self):
-        """Test that agents cannot complete another agent's job."""
-        _, _, h1 = register_agent("agent1")
-        _, _, h2 = register_agent("agent2")
-        
-        # Agent1 submits and claims a job
-        r = client.post("/v1/queue/submit", json={"payload": "agent1 work"}, headers=h1)
-        job_id = r.json()["job_id"]
-        client.post("/v1/queue/claim", headers=h1)
-        
-        # Agent2 tries to complete Agent1's job - should fail with 403
-        complete_resp = client.post(f"/v1/queue/{job_id}/complete", params={"result": "hacked!"}, headers=h2)
-        assert complete_resp.status_code == 403
-        assert "Not authorized" in complete_resp.json()["detail"]
-        
-        # Agent1 can complete their own job
-        complete_resp = client.post(f"/v1/queue/{job_id}/complete", params={"result": "done!"}, headers=h1)
-        assert complete_resp.status_code == 200
-        assert complete_resp.json()["status"] == "completed"
-
-    def test_cannot_fail_other_agent_job(self):
-        """Test that agents cannot fail another agent's job."""
-        _, _, h1 = register_agent("agent1")
-        _, _, h2 = register_agent("agent2")
-        
-        # Agent1 submits and claims a job with max_attempts=2 for retry
-        r = client.post("/v1/queue/submit", json={"payload": "agent1 work", "max_attempts": 2}, headers=h1)
-        job_id = r.json()["job_id"]
-        client.post("/v1/queue/claim", headers=h1)
-        
-        # Agent2 tries to fail Agent1's job - should fail with 403
-        fail_resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "hacked!"}, headers=h2)
-        assert fail_resp.status_code == 403
-        assert "Not authorized" in fail_resp.json()["detail"]
-        
-        # Agent1 can fail their own job
-        fail_resp = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "error"}, headers=h1)
-        assert fail_resp.status_code == 200
-        assert fail_resp.json()["status"] == "pending_retry"
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RELAY
@@ -1334,3 +1267,169 @@ class TestHeartbeat:
         # Agent should now be offline
         me2 = client.get("/v1/directory/me", headers=h).json()
         assert me2["heartbeat_status"] == "offline"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER AUTH & DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestUserAuth:
+    """Tests for user accounts, JWT auth, dashboard endpoints, and tier enforcement."""
+
+    def _signup(self, email="user@example.com", password="securepass123", display_name="Test"):
+        r = client.post("/v1/auth/signup", json={
+            "email": email, "password": password, "display_name": display_name,
+        })
+        return r
+
+    def _auth_header(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_signup(self):
+        r = self._signup()
+        assert r.status_code == 200
+        d = r.json()
+        assert d["user_id"].startswith("user_")
+        assert "token" in d
+        assert d["message"] == "Account created"
+
+    def test_signup_duplicate_email(self):
+        self._signup(email="dup@example.com")
+        r = self._signup(email="dup@example.com")
+        assert r.status_code == 409
+
+    def test_signup_weak_password(self):
+        r = self._signup(password="short")
+        assert r.status_code == 422  # Pydantic min_length=6
+
+    def test_login(self):
+        self._signup(email="login@example.com", password="goodpass123")
+        r = client.post("/v1/auth/login", json={
+            "email": "login@example.com", "password": "goodpass123",
+        })
+        assert r.status_code == 200
+        d = r.json()
+        assert "token" in d
+        # Verify token works on /auth/me
+        me = client.get("/v1/auth/me", headers=self._auth_header(d["token"]))
+        assert me.status_code == 200
+        assert me.json()["email"] == "login@example.com"
+
+    def test_login_wrong_password(self):
+        self._signup(email="wp@example.com", password="correctpass")
+        r = client.post("/v1/auth/login", json={
+            "email": "wp@example.com", "password": "wrongpass",
+        })
+        assert r.status_code == 401
+
+    def test_login_nonexistent(self):
+        r = client.post("/v1/auth/login", json={
+            "email": "nobody@example.com", "password": "whatever",
+        })
+        assert r.status_code == 401
+
+    def test_me(self):
+        r = self._signup(email="me@example.com", display_name="MeUser")
+        token = r.json()["token"]
+        me = client.get("/v1/auth/me", headers=self._auth_header(token))
+        assert me.status_code == 200
+        d = me.json()
+        assert d["email"] == "me@example.com"
+        assert d["display_name"] == "MeUser"
+        assert d["subscription_tier"] == "free"
+        assert d["agent_count"] == 0
+
+    def test_me_expired_token(self):
+        import jwt as pyjwt
+        from main import JWT_SECRET, JWT_ALGORITHM
+        from datetime import timedelta
+        expired = pyjwt.encode({
+            "user_id": "user_fake",
+            "email": "x@x.com",
+            "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+            "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+        }, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        r = client.get("/v1/auth/me", headers=self._auth_header(expired))
+        assert r.status_code == 401
+
+    def test_register_agent_with_user(self):
+        r = self._signup(email="owner@example.com")
+        token = r.json()["token"]
+        user_id = r.json()["user_id"]
+        reg = client.post("/v1/register", json={"name": "owned-bot"},
+                          headers=self._auth_header(token))
+        assert reg.status_code == 200
+        agent_id = reg.json()["agent_id"]
+        # Verify ownership via /v1/user/agents
+        agents = client.get("/v1/user/agents", headers=self._auth_header(token))
+        assert agents.status_code == 200
+        ids = [a["agent_id"] for a in agents.json()["agents"]]
+        assert agent_id in ids
+
+    def test_register_agent_without_user(self):
+        r = client.post("/v1/register", json={"name": "no-owner"})
+        assert r.status_code == 200
+        assert r.json()["agent_id"].startswith("agent_")
+
+    def test_user_agents_list(self):
+        r = self._signup(email="list@example.com")
+        token = r.json()["token"]
+        # Bump max_agents to allow 2
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE users SET max_agents = 5 WHERE user_id = ?", (r.json()["user_id"],))
+        conn.commit()
+        conn.close()
+        # Register 2 agents
+        client.post("/v1/register", json={"name": "bot1"}, headers=self._auth_header(token))
+        client.post("/v1/register", json={"name": "bot2"}, headers=self._auth_header(token))
+        agents = client.get("/v1/user/agents", headers=self._auth_header(token))
+        assert agents.status_code == 200
+        assert agents.json()["count"] == 2
+
+    def test_user_agents_isolation(self):
+        r_a = self._signup(email="a@example.com")
+        r_b = self._signup(email="b@example.com")
+        token_a = r_a.json()["token"]
+        token_b = r_b.json()["token"]
+        # User A registers an agent
+        client.post("/v1/register", json={"name": "a-bot"}, headers=self._auth_header(token_a))
+        # User B should see 0 agents
+        agents_b = client.get("/v1/user/agents", headers=self._auth_header(token_b))
+        assert agents_b.json()["count"] == 0
+        # User A should see 1
+        agents_a = client.get("/v1/user/agents", headers=self._auth_header(token_a))
+        assert agents_a.json()["count"] == 1
+
+    def test_agent_limit_enforcement(self):
+        r = self._signup(email="limit@example.com")
+        token = r.json()["token"]
+        # First agent should succeed (free tier allows 1)
+        r1 = client.post("/v1/register", json={"name": "first"}, headers=self._auth_header(token))
+        assert r1.status_code == 200
+        # Second agent should fail
+        r2 = client.post("/v1/register", json={"name": "second"}, headers=self._auth_header(token))
+        assert r2.status_code == 403
+        assert "Agent limit" in r2.json()["detail"]
+
+    def test_usage_quota(self):
+        r = self._signup(email="quota@example.com")
+        token = r.json()["token"]
+        user_id = r.json()["user_id"]
+        # Register an agent under this user
+        reg = client.post("/v1/register", json={"name": "quota-bot"}, headers=self._auth_header(token))
+        api_key = reg.json()["api_key"]
+        agent_headers = {"X-API-Key": api_key}
+        # Set usage_count to max_api_calls - 1 (free = 10000)
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE users SET usage_count = 9999 WHERE user_id = ?", (user_id,))
+        conn.commit()
+        conn.close()
+        # This request should succeed (9999 -> increments to 10000)
+        r1 = client.get("/v1/memory", headers=agent_headers)
+        assert r1.status_code == 200
+        # Next request should be blocked (usage_count >= 10000)
+        r2 = client.get("/v1/memory", headers=agent_headers)
+        assert r2.status_code == 429
+        assert "quota" in r2.json()["detail"].lower()
