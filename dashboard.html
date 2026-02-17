@@ -84,6 +84,65 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .warning-text { color:var(--yellow); font-family:'JetBrains Mono',monospace; font-size:0.7rem; margin-bottom:1rem; }
 .modal-actions { display:flex; gap:0.75rem; justify-content:flex-end; }
 
+/* Agent detail page */
+.back-link { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); cursor:pointer; display:inline-flex; align-items:center; gap:6px; margin-bottom:1.25rem; transition:color 0.2s; }
+.back-link:hover { color:var(--accent); }
+.detail-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; flex-wrap:wrap; gap:1rem; }
+.detail-header h1 { font-size:1.5rem; font-weight:600; letter-spacing:-1px; margin-bottom:0.15rem; }
+.detail-header .agent-id { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text-dim); cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+.detail-header .agent-id:hover { color:var(--accent); }
+.detail-meta { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); margin-top:4px; }
+.status-badge-lg { font-family:'JetBrains Mono',monospace; font-size:0.7rem; padding:4px 12px; border-radius:14px; display:inline-flex; align-items:center; gap:6px; }
+.status-online { color:var(--green); background:rgba(68,204,102,0.1); border:1px solid rgba(68,204,102,0.2); }
+.status-offline { color:var(--text-dim); background:rgba(122,122,146,0.08); border:1px solid var(--border); }
+.status-busy { color:var(--yellow); background:rgba(255,204,0,0.1); border:1px solid rgba(255,204,0,0.2); }
+
+.stats-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:0.75rem; margin-bottom:1.75rem; }
+.stat-card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; }
+.stat-card:hover { border-color:rgba(255,51,51,0.3); }
+.stat-card .label { font-family:'JetBrains Mono',monospace; font-size:0.6rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; margin-bottom:0.3rem; }
+.stat-card .value { font-size:1.5rem; font-weight:700; font-family:'JetBrains Mono',monospace; }
+.stat-card .value.red { color:var(--accent); }
+.stat-card .value.blue { color:var(--blue); }
+.stat-card .value.purple { color:var(--purple); }
+.stat-card .value.yellow { color:var(--yellow); }
+.stat-card .sub { font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-dim); margin-top:2px; }
+
+.section-title { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:0.75rem; display:flex; align-items:center; gap:8px; }
+.section-title .refresh-dot { width:6px; height:6px; background:var(--green); border-radius:50%; animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.activity-list { background:var(--surface); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:1.75rem; }
+.activity-item { display:flex; align-items:flex-start; gap:12px; padding:0.75rem 1rem; border-bottom:1px solid var(--border); font-size:0.8rem; transition:background 0.1s; }
+.activity-item:last-child { border-bottom:none; }
+.activity-item:hover { background:rgba(255,51,51,0.03); }
+.activity-icon { font-size:1rem; flex-shrink:0; width:24px; text-align:center; line-height:1.4; }
+.activity-text { flex:1; color:var(--text); }
+.activity-text .dim { color:var(--text-dim); font-family:'JetBrains Mono',monospace; font-size:0.7rem; }
+.activity-time { font-family:'JetBrains Mono',monospace; font-size:0.65rem; color:var(--text-dim); white-space:nowrap; flex-shrink:0; }
+
+.actions-row { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:0.75rem; margin-bottom:1.75rem; }
+.action-btn { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1rem; cursor:pointer; transition:all 0.2s; text-align:left; }
+.action-btn:hover { border-color:rgba(255,51,51,0.3); }
+.action-btn.disabled { opacity:0.4; cursor:not-allowed; }
+.action-btn .action-icon { font-size:1.2rem; margin-bottom:0.4rem; }
+.action-btn .action-label { font-family:'JetBrains Mono',monospace; font-size:0.75rem; color:var(--text); font-weight:500; }
+.action-btn .action-desc { font-size:0.7rem; color:var(--text-dim); margin-top:2px; }
+.action-btn-danger:hover { border-color:rgba(255,68,68,0.4); background:rgba(255,68,68,0.04); }
+
+.usage-bar-wrap { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.25rem; margin-bottom:1.75rem; }
+.usage-bar-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; }
+.usage-bar-header .label { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+.usage-bar-header .count { font-family:'JetBrains Mono',monospace; font-size:0.85rem; font-weight:600; }
+.usage-track { background:var(--bg); border-radius:6px; height:10px; overflow:hidden; }
+.usage-fill { height:100%; border-radius:6px; transition:width 0.5s ease; }
+.usage-fill.green { background:var(--green); }
+.usage-fill.yellow { background:var(--yellow); }
+.usage-fill.red { background:var(--red); }
+
+.modal textarea { width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text); padding:10px 14px; border-radius:8px; font-family:'JetBrains Mono',monospace; font-size:0.8rem; outline:none; resize:vertical; min-height:80px; }
+.modal textarea:focus { border-color:var(--accent); }
+
 /* Empty state */
 .empty-state { text-align:center; padding:4rem 2rem; }
 .empty-state .icon { font-size:2.5rem; margin-bottom:1rem; opacity:0.3; }
@@ -146,6 +205,10 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
     // Auth guard
     if (!token) return navigate("#/login");
     if (hash === "#/agents") return renderAgents(app);
+
+    // Agent detail: #/agents/agent_xxxx
+    var m = hash.match(/^#\/agents\/(agent_[a-f0-9]+)$/);
+    if (m) return renderAgentDetail(app, m[1]);
 
     navigate("#/agents");
   }
@@ -347,7 +410,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       agents.forEach(function(a) {
         var isOn = a.heartbeat_status === "online" || a.heartbeat_status === "busy" || a.heartbeat_status === "idle";
         html +=
-          '<div class="agent-card">' +
+          '<div class="agent-card" style="cursor:pointer" onclick="window.location.hash=\'#/agents/' + a.agent_id + '\'">' +
           '<div class="agent-card-header"><div>' +
           '<div class="agent-name">' + esc(a.name || "Unnamed Agent") + '</div>' +
           '<div class="agent-id">' + esc(truncId(a.agent_id)) + '</div></div>' +
@@ -367,6 +430,253 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
       document.getElementById("agents-content").innerHTML =
         '<div class="alert alert-error">Failed to load agents: ' + esc(err.detail || "Unknown error") + "</div>";
     });
+  }
+
+  // ── Agent Detail Page ──
+  var _activityTimer = null;
+
+  function renderAgentDetail(app, agentId) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+
+    if (!user) {
+      api("GET", "/v1/auth/me").then(function(me) {
+        user = me;
+        renderAgentDetail(app, agentId);
+      }).catch(function() { token = null; navigate("#/login"); });
+      app.innerHTML = '<div class="loading-page"><span class="spinner"></span> Loading\u2026</div>';
+      return;
+    }
+
+    var tier = user.subscription_tier || "free";
+    var maxCalls = user.max_api_calls || 10000;
+
+    // Shell with header + modal
+    app.innerHTML =
+      '<header>' +
+      '<a class="logo" id="logo-link">Molt<span>Grid</span></a>' +
+      '<div class="header-right">' +
+      '<span class="user-email">' + esc(user.email) + '</span>' +
+      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
+      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
+      '</div></header>' +
+      '<div class="page">' +
+      '<div class="back-link" id="back-link">\u2190 Back to agents</div>' +
+      '<div id="detail-content"><div class="loading-page"><span class="spinner"></span> Loading agent\u2026</div></div>' +
+      '</div>' +
+      '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
+
+    document.getElementById("logo-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
+    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); token = null; user = null; navigate("#/login"); };
+    document.getElementById("back-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
+    document.getElementById("modal-overlay").onclick = function(e) {
+      if (e.target.id === "modal-overlay") e.target.classList.remove("active");
+    };
+
+    // Fetch stats
+    api("GET", "/v1/user/agents/" + agentId + "/stats").then(function(s) {
+      var isOn = s.heartbeat_status === "online" || s.heartbeat_status === "busy" || s.heartbeat_status === "idle";
+      var statusCls = s.heartbeat_status === "busy" ? "busy" : (isOn ? "online" : "offline");
+      var statusLabel = s.heartbeat_status || "unknown";
+
+      var usagePct = maxCalls > 0 ? Math.min(100, Math.round((user.usage_count / maxCalls) * 100)) : 0;
+      var barCls = usagePct >= 95 ? "red" : (usagePct >= 80 ? "yellow" : "green");
+
+      var dc = document.getElementById("detail-content");
+      dc.innerHTML =
+        // Header
+        '<div class="detail-header"><div>' +
+        '<h1>' + esc(s.name || "Unnamed Agent") + '</h1>' +
+        '<div class="agent-id" id="copy-agent-id" title="Click to copy">' + esc(agentId) + ' \u2398</div>' +
+        '<div class="detail-meta">Created ' + esc(timeAgo(s.created_at)) + ' \u00b7 ' + (s.request_count || 0).toLocaleString() + ' total requests</div>' +
+        '</div><div>' +
+        '<span class="status-badge-lg status-' + statusCls + '">' +
+        '<span class="status-dot ' + (isOn ? "online" : "offline") + '"></span> ' + esc(statusLabel) + '</span>' +
+        '</div></div>' +
+
+        // Stats row
+        '<div class="stats-row">' +
+        '<div class="stat-card"><div class="label">Memory Keys</div><div class="value blue">' + s.memory_keys + '</div></div>' +
+        '<div class="stat-card"><div class="label">Jobs</div><div class="value red">' + (s.jobs_pending + s.jobs_completed) + '</div>' +
+        '<div class="sub">' + s.jobs_pending + ' pending \u00b7 ' + s.jobs_completed + ' done' + (s.jobs_failed ? ' \u00b7 ' + s.jobs_failed + ' failed' : '') + '</div></div>' +
+        '<div class="stat-card"><div class="label">Messages</div><div class="value purple">' + (s.messages_sent + s.messages_received) + '</div>' +
+        '<div class="sub">' + s.messages_sent + ' sent \u00b7 ' + s.messages_received + ' received</div></div>' +
+        '<div class="stat-card"><div class="label">Schedules</div><div class="value yellow">' + s.schedules_active + '</div><div class="sub">active</div></div>' +
+        '</div>' +
+
+        // Usage bar
+        '<div class="usage-bar-wrap">' +
+        '<div class="usage-bar-header">' +
+        '<span class="label">API Usage This Month</span>' +
+        '<span class="count">' + (user.usage_count || 0).toLocaleString() + ' / ' + (maxCalls > 999999998 ? '\u221e' : maxCalls.toLocaleString()) + '</span></div>' +
+        '<div class="usage-track"><div class="usage-fill ' + barCls + '" style="width:' + usagePct + '%"></div></div>' +
+        (usagePct >= 80 ? '<div style="margin-top:8px;text-align:right"><button class="btn btn-accent btn-sm" id="usage-upgrade">Upgrade plan</button></div>' : '') +
+        '</div>' +
+
+        // Activity feed
+        '<div class="section-title"><span class="refresh-dot"></span> Activity Feed</div>' +
+        '<div id="activity-feed"><div class="loading-page" style="min-height:10vh"><span class="spinner"></span> Loading\u2026</div></div>' +
+
+        // Quick actions
+        '<div class="section-title" style="margin-top:1.75rem">Quick Actions</div>' +
+        '<div class="actions-row">' +
+        '<div class="action-btn" id="act-message"><div class="action-icon">\uD83D\uDCE8</div><div class="action-label">Send Test Message</div><div class="action-desc">Send a message to another agent</div></div>' +
+        '<div class="action-btn" id="act-job"><div class="action-icon">\uD83D\uDCE6</div><div class="action-label">Submit Test Job</div><div class="action-desc">Add a job to the queue</div></div>' +
+        '<div class="action-btn disabled"><div class="action-icon">\uD83D\uDD11</div><div class="action-label">View API Key</div><div class="action-desc">Keys cannot be recovered</div></div>' +
+        '<div class="action-btn action-btn-danger" id="act-delete"><div class="action-icon">\uD83D\uDDD1\uFE0F</div><div class="action-label">Delete Agent</div><div class="action-desc">Permanently remove this agent</div></div>' +
+        '</div>';
+
+      // Copy agent ID
+      document.getElementById("copy-agent-id").onclick = function() {
+        navigator.clipboard.writeText(agentId);
+        this.innerHTML = esc(agentId) + " \u2714";
+        var self = this;
+        setTimeout(function() { self.innerHTML = esc(agentId) + " \u2398"; }, 1500);
+      };
+
+      // Upgrade button
+      var ub = document.getElementById("usage-upgrade");
+      if (ub) ub.onclick = showUpgradeModal;
+
+      // Quick action handlers
+      document.getElementById("act-message").onclick = function() { showMessageModal(agentId); };
+      document.getElementById("act-job").onclick = function() { showJobModal(agentId); };
+      document.getElementById("act-delete").onclick = function() { showDeleteModal(agentId); };
+
+      // Load activity feed
+      loadActivity(agentId);
+      _activityTimer = setInterval(function() { loadActivity(agentId); }, 10000);
+
+    }).catch(function(err) {
+      document.getElementById("detail-content").innerHTML =
+        '<div class="alert alert-error">' + esc(err.detail || "Failed to load agent") + '</div>';
+    });
+  }
+
+  function loadActivity(agentId) {
+    api("GET", "/v1/user/agents/" + agentId + "/activity").then(function(data) {
+      var feed = document.getElementById("activity-feed");
+      if (!feed) return;
+      var events = data.events || [];
+      if (events.length === 0) {
+        feed.innerHTML = '<div class="activity-list"><div class="activity-item"><div class="activity-text dim">No activity yet</div></div></div>';
+        return;
+      }
+      var html = '<div class="activity-list">';
+      events.forEach(function(ev) {
+        var icon = "\uD83D\uDCCB"; // default clipboard
+        var text = "";
+        var t = ev.event_type || "";
+        if (t === "message_received") {
+          icon = "\uD83D\uDCE8"; text = "Message received from <span class=\"dim\">" + esc(ev.source || "unknown") + "</span>";
+        } else if (t === "message_sent") {
+          icon = "\uD83D\uDCE4"; text = "Message sent to <span class=\"dim\">" + esc(ev.target || "unknown") + "</span>";
+        } else if (t.indexOf("job_completed") === 0) {
+          icon = "\u2705"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> completed";
+        } else if (t.indexOf("job_failed") === 0) {
+          icon = "\u274C"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> failed";
+        } else if (t.indexOf("job_pending") === 0) {
+          icon = "\uD83D\uDCE6"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> submitted";
+        } else if (t.indexOf("job_") === 0) {
+          icon = "\u23F3"; text = "Job <span class=\"dim\">" + esc(ev.job_id || "") + "</span> " + esc(t.replace("job_", ""));
+        } else if (t === "memory_update") {
+          icon = "\uD83D\uDCBE"; text = "Memory key <span class=\"dim\">\"" + esc(ev.key || "") + "\"</span> updated";
+        } else {
+          text = esc(t);
+        }
+        html += '<div class="activity-item">' +
+          '<div class="activity-icon">' + icon + '</div>' +
+          '<div class="activity-text">' + text + '</div>' +
+          '<div class="activity-time">' + esc(timeAgo(ev.timestamp)) + '</div></div>';
+      });
+      html += '</div>';
+      feed.innerHTML = html;
+    }).catch(function() {});
+  }
+
+  // ── Action Modals ──
+  function showMessageModal(fromAgentId) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Send Test Message</h2>' +
+      '<p class="subtitle">Send from ' + esc(fromAgentId) + '</p>' +
+      '<div class="form-group"><label>Recipient Agent ID</label>' +
+      '<input type="text" id="msg-to" placeholder="agent_xxxxxxxxxxxx"></div>' +
+      '<div class="form-group"><label>Payload</label>' +
+      '<textarea id="msg-payload" placeholder=\'{"hello": "world"}\'></textarea></div>' +
+      '<div id="msg-result"></div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="msg-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="msg-send">Send</button></div>';
+
+    document.getElementById("msg-cancel").onclick = function() { overlay.classList.remove("active"); };
+    document.getElementById("msg-send").onclick = function() {
+      var to = document.getElementById("msg-to").value.trim();
+      var payload = document.getElementById("msg-payload").value.trim() || "test";
+      if (!to) return;
+      var btn = document.getElementById("msg-send");
+      btn.disabled = true; btn.textContent = "Sending\u2026";
+      // We need to use the agent's API key, but we don't have it.
+      // Instead, use the relay/send endpoint description to explain this.
+      document.getElementById("msg-result").innerHTML =
+        '<div class="alert alert-error">Messages must be sent using the agent\'s API key via POST /v1/relay/send. ' +
+        'Use your agent\'s key in code or curl.</div>';
+      btn.disabled = false; btn.textContent = "Send";
+    };
+  }
+
+  function showJobModal(agentId) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Submit Test Job</h2>' +
+      '<p class="subtitle">Queue a job for ' + esc(agentId) + '</p>' +
+      '<div class="form-group"><label>Payload (JSON)</label>' +
+      '<textarea id="job-payload" placeholder=\'{"task": "process_data"}\'></textarea></div>' +
+      '<div class="form-group"><label>Priority (0-10)</label>' +
+      '<input type="number" id="job-priority" value="0" min="0" max="10"></div>' +
+      '<div id="job-result"></div>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="job-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" id="job-send">Submit</button></div>';
+
+    document.getElementById("job-cancel").onclick = function() { overlay.classList.remove("active"); };
+    document.getElementById("job-send").onclick = function() {
+      var payload = document.getElementById("job-payload").value.trim() || "{}";
+      document.getElementById("job-result").innerHTML =
+        '<div class="alert alert-error">Jobs must be submitted using the agent\'s API key via POST /v1/queue/submit. ' +
+        'Use your agent\'s key in code or curl.</div>';
+    };
+  }
+
+  function showDeleteModal(agentId) {
+    var overlay = document.getElementById("modal-overlay");
+    var mc = document.getElementById("modal-content");
+    overlay.classList.add("active");
+    mc.innerHTML =
+      '<h2>Delete Agent</h2>' +
+      '<p class="subtitle">This will permanently delete <strong>' + esc(agentId) + '</strong> and all its data (memory, jobs, messages, webhooks, schedules).</p>' +
+      '<p class="warning-text">\u26A0 This action cannot be undone.</p>' +
+      '<div class="modal-actions">' +
+      '<button class="btn btn-ghost" id="del-cancel">Cancel</button>' +
+      '<button class="btn btn-accent" style="background:var(--red)" id="del-confirm">Delete permanently</button></div>';
+
+    document.getElementById("del-cancel").onclick = function() { overlay.classList.remove("active"); };
+    document.getElementById("del-confirm").onclick = function() {
+      var btn = document.getElementById("del-confirm");
+      btn.disabled = true; btn.textContent = "Deleting\u2026";
+      api("DELETE", "/v1/user/agents/" + agentId).then(function() {
+        overlay.classList.remove("active");
+        if (_activityTimer) clearInterval(_activityTimer);
+        user = null; // force refresh
+        navigate("#/agents");
+      }).catch(function(err) {
+        btn.disabled = false; btn.textContent = "Delete permanently";
+        window.alert("Failed: " + (err.detail || "Unknown error"));
+      });
+    };
   }
 
   // ── Register new agent ──

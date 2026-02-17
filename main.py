@@ -672,6 +672,54 @@ def user_agent_activity(agent_id: str, user_id: str = Depends(get_user_id)):
     events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
     return {"agent_id": agent_id, "events": events[:50]}
 
+@app.get("/v1/user/agents/{agent_id}/stats", tags=["User Dashboard"])
+def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
+    """Get aggregate stats for one owned agent."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        memory_keys = db.execute("SELECT COUNT(*) as cnt FROM memory WHERE agent_id = ?", (agent_id,)).fetchone()["cnt"]
+        jobs_pending = db.execute("SELECT COUNT(*) as cnt FROM queue WHERE agent_id = ? AND status = 'pending'", (agent_id,)).fetchone()["cnt"]
+        jobs_completed = db.execute("SELECT COUNT(*) as cnt FROM queue WHERE agent_id = ? AND status = 'completed'", (agent_id,)).fetchone()["cnt"]
+        jobs_failed = db.execute("SELECT COUNT(*) as cnt FROM queue WHERE agent_id = ? AND status = 'failed'", (agent_id,)).fetchone()["cnt"]
+        msgs_sent = db.execute("SELECT COUNT(*) as cnt FROM relay WHERE from_agent = ?", (agent_id,)).fetchone()["cnt"]
+        msgs_received = db.execute("SELECT COUNT(*) as cnt FROM relay WHERE to_agent = ?", (agent_id,)).fetchone()["cnt"]
+        schedules = db.execute("SELECT COUNT(*) as cnt FROM scheduled_tasks WHERE agent_id = ? AND enabled = 1", (agent_id,)).fetchone()["cnt"]
+        agent = db.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,)).fetchone()
+    return {
+        "agent_id": agent_id,
+        "name": agent["name"],
+        "description": agent["description"],
+        "heartbeat_status": agent["heartbeat_status"],
+        "heartbeat_at": agent["heartbeat_at"],
+        "request_count": agent["request_count"],
+        "created_at": agent["created_at"],
+        "last_seen": agent["last_seen"],
+        "memory_keys": memory_keys,
+        "jobs_pending": jobs_pending,
+        "jobs_completed": jobs_completed,
+        "jobs_failed": jobs_failed,
+        "messages_sent": msgs_sent,
+        "messages_received": msgs_received,
+        "schedules_active": schedules,
+    }
+
+@app.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
+def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
+    """Delete an owned agent and all its data."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        db.execute("DELETE FROM memory WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM queue WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
+        db.execute("DELETE FROM webhooks WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM scheduled_tasks WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM shared_memory WHERE owner_agent=?", (agent_id,))
+        db.execute("DELETE FROM rate_limits WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (agent_id, agent_id))
+        db.execute("DELETE FROM marketplace WHERE creator_agent=?", (agent_id,))
+        db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
+    return {"status": "deleted", "agent_id": agent_id}
+
 @app.get("/v1/user/usage", tags=["User Dashboard"])
 def user_usage(user_id: str = Depends(get_user_id)):
     """Aggregate usage stats for the current billing period (calendar month)."""
