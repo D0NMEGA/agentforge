@@ -7,3 +7,4 @@ cryptography>=43.0.0
 pyjwt>=2.8
 bcrypt>=4.0
 python-multipart>=0.0.6
+stripe>=8.0

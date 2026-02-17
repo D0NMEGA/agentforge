@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 import jwt as pyjwt
 import bcrypt as _bcrypt
+import stripe
 
 logger = logging.getLogger("moltgrid")
 
@@ -64,6 +65,21 @@ JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 7
 
+# Stripe billing
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_HOBBY = os.getenv("STRIPE_PRICE_HOBBY", "")
+STRIPE_PRICE_TEAM = os.getenv("STRIPE_PRICE_TEAM", "")
+STRIPE_PRICE_SCALE = os.getenv("STRIPE_PRICE_SCALE", "")
+if STRIPE_SECRET_KEY:
+    stripe.api_key = STRIPE_SECRET_KEY
+
+STRIPE_TIER_PRICES = {
+    "hobby": STRIPE_PRICE_HOBBY,
+    "team":  STRIPE_PRICE_TEAM,
+    "scale": STRIPE_PRICE_SCALE,
+}
+
 # Contact form SMTP: set SMTP_PASSWORD env var (Gmail App Password)
 SMTP_FROM = os.getenv("SMTP_FROM", "")
 SMTP_TO = os.getenv("SMTP_TO", "")
@@ -80,7 +96,8 @@ async def lifespan(app):
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_uptime_loop, daemon=True).start()
     threading.Thread(target=_liveness_loop, daemon=True).start()
-    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor)")
+    threading.Thread(target=_usage_reset_loop, daemon=True).start()
+    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
     app.openapi_schema = None
     logger.info("OpenAPI schema cache cleared")
@@ -356,6 +373,17 @@ def init_db():
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
+
+    # Migrate existing users table — add columns for billing
+    try:
+        u_existing = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        for col, typedef in [
+            ("payment_failed", "INTEGER DEFAULT 0"),
+        ]:
+            if col not in u_existing:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+    except Exception:
+        pass  # users table may not exist yet on first run
 
     # Migrate existing queue table — add retry/dead-letter columns
     q_existing = {row[1] for row in conn.execute("PRAGMA table_info(queue)").fetchall()}
@@ -761,6 +789,167 @@ def user_delete_account(user_id: str = Depends(get_user_id)):
         # Unlink agents (they become unowned, still functional)
         db.execute("UPDATE agents SET owner_id = NULL WHERE owner_id = ?", (user_id,))
     return {"user_id": user_id, "message": "Account deactivated. Agents unlinked."}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STRIPE BILLING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _apply_tier(db, user_id: str, tier: str):
+    """Update a user's subscription tier and associated limits."""
+    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+    max_calls = limits["max_api_calls"] if limits["max_api_calls"] is not None else 999999999
+    db.execute(
+        "UPDATE users SET subscription_tier = ?, max_agents = ?, max_api_calls = ?, payment_failed = 0 WHERE user_id = ?",
+        (tier, limits["max_agents"], max_calls, user_id),
+    )
+
+def _get_or_create_stripe_customer(db, user_id: str, email: str) -> str:
+    """Get existing Stripe customer ID or create a new one."""
+    row = db.execute("SELECT stripe_customer_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+    if row and row["stripe_customer_id"]:
+        return row["stripe_customer_id"]
+    customer = stripe.Customer.create(email=email, metadata={"moltgrid_user_id": user_id})
+    db.execute("UPDATE users SET stripe_customer_id = ? WHERE user_id = ?", (customer.id, user_id))
+    return customer.id
+
+class CheckoutRequest(BaseModel):
+    tier: str = Field(..., description="Subscription tier: hobby, team, or scale")
+
+@app.post("/v1/billing/checkout", tags=["Billing"])
+def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
+    """Create a Stripe Checkout Session for upgrading subscription."""
+    if req.tier not in STRIPE_TIER_PRICES:
+        raise HTTPException(400, f"Invalid tier '{req.tier}'. Must be: hobby, team, or scale")
+    price_id = STRIPE_TIER_PRICES[req.tier]
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(503, "Stripe is not configured on this server")
+    if not price_id:
+        raise HTTPException(503, f"Stripe price ID not configured for tier '{req.tier}'")
+
+    with get_db() as db:
+        user = db.execute("SELECT email, stripe_customer_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+        customer_id = _get_or_create_stripe_customer(db, user_id, user["email"])
+
+    session = stripe.checkout.Session.create(
+        customer=customer_id,
+        mode="subscription",
+        line_items=[{"price": price_id, "quantity": 1}],
+        success_url="https://moltgrid.net/billing/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url="https://moltgrid.net/billing/cancel",
+        metadata={"moltgrid_user_id": user_id, "tier": req.tier},
+    )
+    return {"checkout_url": session.url}
+
+@app.post("/v1/billing/portal", tags=["Billing"])
+def billing_portal(user_id: str = Depends(get_user_id)):
+    """Create a Stripe Customer Portal session for managing subscription."""
+    if not STRIPE_SECRET_KEY:
+        raise HTTPException(503, "Stripe is not configured on this server")
+
+    with get_db() as db:
+        user = db.execute("SELECT stripe_customer_id FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user or not user["stripe_customer_id"]:
+            raise HTTPException(400, "No Stripe customer found. Subscribe first.")
+
+    session = stripe.billing_portal.Session.create(
+        customer=user["stripe_customer_id"],
+        return_url="https://moltgrid.net/billing",
+    )
+    return {"portal_url": session.url}
+
+def _tier_from_price(price_id: str) -> str:
+    """Map a Stripe price ID back to a MoltGrid tier name."""
+    for tier, pid in STRIPE_TIER_PRICES.items():
+        if pid and pid == price_id:
+            return tier
+    return "free"
+
+@app.post("/v1/stripe/webhook", tags=["Billing"])
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events. Verifies signature, updates user tiers."""
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+
+    if STRIPE_WEBHOOK_SECRET:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
+        except stripe.error.SignatureVerificationError:
+            raise HTTPException(400, "Invalid webhook signature")
+        except Exception as e:
+            raise HTTPException(400, f"Webhook error: {e}")
+    else:
+        # No webhook secret configured — parse raw (dev/test only)
+        event = json.loads(payload)
+
+    event_type = event.get("type", "") if isinstance(event, dict) else event.type
+    data_obj = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
+
+    with get_db() as db:
+        if event_type == "checkout.session.completed":
+            user_id = (data_obj.get("metadata") or {}).get("moltgrid_user_id")
+            tier = (data_obj.get("metadata") or {}).get("tier", "hobby")
+            sub_id = data_obj.get("subscription")
+            if user_id:
+                _apply_tier(db, user_id, tier)
+                db.execute("UPDATE users SET stripe_subscription_id = ? WHERE user_id = ?", (sub_id, user_id))
+
+        elif event_type == "customer.subscription.updated":
+            cust_id = data_obj.get("customer")
+            user = db.execute("SELECT user_id FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
+            if user:
+                items = data_obj.get("items", {}).get("data", [])
+                if items:
+                    price_id = items[0].get("price", {}).get("id", "")
+                    tier = _tier_from_price(price_id)
+                    _apply_tier(db, user["user_id"], tier)
+
+        elif event_type == "customer.subscription.deleted":
+            cust_id = data_obj.get("customer")
+            user = db.execute("SELECT user_id FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
+            if user:
+                _apply_tier(db, user["user_id"], "free")
+                db.execute("UPDATE users SET stripe_subscription_id = NULL WHERE user_id = ?", (user["user_id"],))
+
+        elif event_type == "invoice.payment_failed":
+            cust_id = data_obj.get("customer")
+            user = db.execute("SELECT user_id FROM users WHERE stripe_customer_id = ?", (cust_id,)).fetchone()
+            if user:
+                db.execute("UPDATE users SET payment_failed = 1 WHERE user_id = ?", (user["user_id"],))
+                logger.warning(f"Payment failed for user {user['user_id']}")
+
+    return {"received": True}
+
+@app.get("/v1/billing/status", tags=["Billing"])
+def billing_status(user_id: str = Depends(get_user_id)):
+    """Get current subscription status."""
+    with get_db() as db:
+        user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+
+    result = {
+        "tier": user["subscription_tier"] or "free",
+        "active": (user["subscription_tier"] or "free") != "free",
+        "usage_this_period": user["usage_count"],
+        "payment_failed": bool(user["payment_failed"]) if user["payment_failed"] is not None else False,
+        "stripe_subscription_id": user["stripe_subscription_id"],
+        "current_period_end": None,
+        "cancel_at_period_end": False,
+    }
+
+    # Fetch live data from Stripe if available
+    if STRIPE_SECRET_KEY and user["stripe_subscription_id"]:
+        try:
+            sub = stripe.Subscription.retrieve(user["stripe_subscription_id"])
+            result["current_period_end"] = datetime.fromtimestamp(sub.current_period_end, tz=timezone.utc).isoformat()
+            result["cancel_at_period_end"] = sub.cancel_at_period_end
+        except Exception:
+            pass  # Stripe unavailable, return what we have
+
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1585,6 +1774,24 @@ def _liveness_loop():
         except Exception as e:
             logger.error(f"Liveness loop error: {e}")
         time.sleep(60)
+
+
+def _run_usage_reset():
+    """Reset usage_count for all users on the 1st of each month."""
+    now = datetime.now(timezone.utc)
+    if now.day == 1:
+        with get_db() as db:
+            db.execute("UPDATE users SET usage_count = 0")
+        logger.info("Monthly usage reset completed")
+
+def _usage_reset_loop():
+    """Background thread: check daily at midnight UTC whether to reset usage counters."""
+    while True:
+        try:
+            _run_usage_reset()
+        except Exception as e:
+            logger.error(f"Usage reset loop error: {e}")
+        time.sleep(86400)  # 24 hours
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
