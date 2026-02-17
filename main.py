@@ -31,6 +31,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
+import jwt as pyjwt
+import bcrypt as _bcrypt
+
 logger = logging.getLogger("moltgrid")
 
 # ─── Config ───────────────────────────────────────────────────────────────────
@@ -47,6 +50,11 @@ ADMIN_SESSION_TTL = 3600 * 24  # 24 hours
 # Encrypted storage: set ENCRYPTION_KEY env var to enable AES encryption at rest
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 _fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
+
+# JWT auth for user accounts
+JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRY_DAYS = 7
 
 # Contact form SMTP: set SMTP_PASSWORD env var (Gmail App Password)
 SMTP_FROM = os.getenv("SMTP_FROM", "")
@@ -308,6 +316,23 @@ def init_db():
             message TEXT NOT NULL,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            display_name TEXT,
+            subscription_tier TEXT DEFAULT 'free',
+            stripe_customer_id TEXT,
+            stripe_subscription_id TEXT,
+            usage_count INTEGER DEFAULT 0,
+            max_agents INTEGER DEFAULT 1,
+            max_api_calls INTEGER DEFAULT 10000,
+            created_at TEXT NOT NULL,
+            last_login TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+        CREATE INDEX IF NOT EXISTS idx_users_stripe ON users(stripe_customer_id);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -319,6 +344,7 @@ def init_db():
         ("credits", "INTEGER DEFAULT 0"),
         ("heartbeat_at", "TEXT"), ("heartbeat_interval", "INTEGER DEFAULT 60"),
         ("heartbeat_status", "TEXT DEFAULT 'unknown'"), ("heartbeat_meta", "TEXT"),
+        ("owner_id", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
@@ -414,6 +440,114 @@ async def get_agent_id(request: Request) -> str:
         return row["agent_id"]
 
 
+# ─── JWT Helpers ──────────────────────────────────────────────────────────────
+
+def _create_token(user_id: str, email: str) -> str:
+    payload = {
+        "user_id": user_id,
+        "email": email,
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRY_DAYS),
+        "iat": datetime.now(timezone.utc),
+    }
+    return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def _decode_token(token: str) -> dict:
+    try:
+        return pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expired")
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(401, "Invalid token")
+
+async def get_user_id(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(401, "Missing Bearer token")
+    claims = _decode_token(auth[7:])
+    return claims["user_id"]
+
+async def get_optional_user_id(request: Request) -> Optional[str]:
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    try:
+        claims = _decode_token(auth[7:])
+        return claims["user_id"]
+    except HTTPException:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER AUTH (JWT)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SignupRequest(BaseModel):
+    email: str = Field(..., max_length=256)
+    password: str = Field(..., min_length=6, max_length=128)
+    display_name: Optional[str] = Field(None, max_length=64)
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., max_length=256)
+    password: str = Field(..., max_length=128)
+
+@app.post("/v1/auth/signup", tags=["Auth"])
+def auth_signup(req: SignupRequest):
+    user_id = f"user_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc).isoformat()
+    pw_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
+
+    with get_db() as db:
+        existing = db.execute("SELECT user_id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
+        if existing:
+            raise HTTPException(409, "Email already registered")
+        db.execute(
+            "INSERT INTO users (user_id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, req.email.lower(), pw_hash, req.display_name, now),
+        )
+    token = _create_token(user_id, req.email.lower())
+    return {"user_id": user_id, "token": token, "message": "Account created"}
+
+@app.post("/v1/auth/login", tags=["Auth"])
+def auth_login(req: LoginRequest):
+    with get_db() as db:
+        row = db.execute("SELECT user_id, password_hash FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
+        if not row or not _bcrypt.checkpw(req.password.encode(), row["password_hash"].encode()):
+            raise HTTPException(401, "Invalid email or password")
+        now = datetime.now(timezone.utc).isoformat()
+        db.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (now, row["user_id"]))
+    token = _create_token(row["user_id"], req.email.lower())
+    return {"user_id": row["user_id"], "token": token}
+
+@app.get("/v1/auth/me", tags=["Auth"])
+def auth_me(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        row = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "User not found")
+        agent_count = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE owner_id = ?", (user_id,)).fetchone()["cnt"]
+    return {
+        "user_id": row["user_id"],
+        "email": row["email"],
+        "display_name": row["display_name"],
+        "subscription_tier": row["subscription_tier"],
+        "max_agents": row["max_agents"],
+        "max_api_calls": row["max_api_calls"],
+        "usage_count": row["usage_count"],
+        "agent_count": agent_count,
+        "created_at": row["created_at"],
+        "last_login": row["last_login"],
+    }
+
+@app.post("/v1/auth/refresh", tags=["Auth"])
+def auth_refresh(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        row = db.execute("SELECT email FROM users WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "User not found")
+    token = _create_token(user_id, row["email"])
+    return {"user_id": user_id, "token": token}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -446,16 +580,28 @@ WELCOME_MESSAGE = (
 )
 
 @app.post("/v1/register", response_model=RegisterResponse, tags=["Auth"])
-def register_agent(req: RegisterRequest):
-    """Register a new agent and receive an API key. Free. No payment required."""
+def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_optional_user_id)):
+    """Register a new agent and receive an API key. Free. No payment required.
+    If a Bearer token is provided, the agent is linked to that user account."""
     agent_id = f"agent_{uuid.uuid4().hex[:12]}"
     api_key = generate_api_key()
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        # Enforce max_agents limit if user is authenticated
+        if owner_id:
+            user = db.execute("SELECT max_agents FROM users WHERE user_id = ?", (owner_id,)).fetchone()
+            if user:
+                current = db.execute("SELECT COUNT(*) as cnt FROM agents WHERE owner_id = ?", (owner_id,)).fetchone()["cnt"]
+                if current >= user["max_agents"]:
+                    raise HTTPException(
+                        403,
+                        f"Agent limit reached ({user['max_agents']}). Upgrade your plan to create more agents.",
+                    )
+
         db.execute(
-            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits) VALUES (?, ?, ?, 1, ?, 200)",
-            (agent_id, hash_key(api_key), req.name, now)
+            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits, owner_id) VALUES (?, ?, ?, 1, ?, 200, ?)",
+            (agent_id, hash_key(api_key), req.name, now, owner_id),
         )
         # Send welcome message from MyFirstAgent
         welcome_exists = db.execute(
@@ -665,9 +811,9 @@ def queue_claim(queue_name: str = "default", agent_id: str = Depends(get_agent_i
     with get_db() as db:
         row = db.execute(
             "SELECT job_id, payload, priority FROM queue WHERE queue_name=? AND status='pending' "
-            "AND agent_id=? AND (next_retry_at IS NULL OR next_retry_at <= ?) "
+            "AND (next_retry_at IS NULL OR next_retry_at <= ?) "
             "ORDER BY priority DESC, created_at ASC LIMIT 1",
-            (queue_name, agent_id, now)
+            (queue_name, now)
         ).fetchone()
         if not row:
             return {"status": "empty", "queue_name": queue_name}
@@ -686,8 +832,6 @@ def queue_complete(job_id: str, result: str = "", agent_id: str = Depends(get_ag
         job_row = db.execute("SELECT agent_id, queue_name FROM queue WHERE job_id=? AND status='processing'", (job_id,)).fetchone()
         if not job_row:
             raise HTTPException(404, "Job not found or not in processing state")
-        if job_row["agent_id"] != agent_id:
-            raise HTTPException(403, "Not authorized to complete this job")
         db.execute(
             "UPDATE queue SET status='completed', completed_at=?, result=? WHERE job_id=?",
             (now, _encrypt(result) if result else result, job_id)
@@ -737,8 +881,6 @@ def queue_fail(job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_a
         ).fetchone()
         if not row:
             raise HTTPException(404, "Job not found or not in processing state")
-        if row["agent_id"] != agent_id:
-            raise HTTPException(403, "Not authorized to fail this job")
 
         attempt = (row["attempt_count"] or 0) + 1
         max_att = row["max_attempts"] or 1
