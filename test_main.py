@@ -1433,3 +1433,64 @@ class TestUserAuth:
         r2 = client.get("/v1/memory", headers=agent_headers)
         assert r2.status_code == 429
         assert "quota" in r2.json()["detail"].lower()
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BILLING & PRICING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBilling:
+    """Tests for pricing, billing endpoints, and Stripe webhook."""
+
+    def test_pricing_public(self):
+        r = client.get("/v1/pricing")
+        assert r.status_code == 200
+        d = r.json()
+        assert d["currency"] == "usd"
+        assert d["billing_period"] == "monthly"
+        assert len(d["tiers"]) == 4
+        names = [t["name"] for t in d["tiers"]]
+        assert names == ["free", "hobby", "team", "scale"]
+        # Verify free tier details
+        free = d["tiers"][0]
+        assert free["price"] == 0
+        assert free["agents"] == 1
+        assert free["api_calls"] == 10000
+
+    def test_checkout_requires_auth(self):
+        r = client.post("/v1/billing/checkout", json={"tier": "hobby"})
+        assert r.status_code == 401
+
+    def test_checkout_invalid_tier(self):
+        # Signup to get a token
+        s = client.post("/v1/auth/signup", json={
+            "email": "checkout@example.com", "password": "securepass123",
+        })
+        token = s.json()["token"]
+        r = client.post("/v1/billing/checkout", json={"tier": "invalid"},
+                        headers={"Authorization": f"Bearer {token}"})
+        assert r.status_code == 400
+        assert "Invalid tier" in r.json()["detail"]
+
+    def test_billing_status_requires_auth(self):
+        r = client.get("/v1/billing/status")
+        assert r.status_code == 401
+
+    def test_stripe_webhook_bad_payload(self):
+        r = client.post("/v1/stripe/webhook", content=b"not json",
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code == 400
+
+    def test_user_starts_free(self):
+        s = client.post("/v1/auth/signup", json={
+            "email": "freetier@example.com", "password": "securepass123",
+        })
+        assert s.status_code == 200
+        token = s.json()["token"]
+        me = client.get("/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me.status_code == 200
+        d = me.json()
+        assert d["subscription_tier"] == "free"
+        assert d["max_agents"] == 1
+        assert d["max_api_calls"] == 10000

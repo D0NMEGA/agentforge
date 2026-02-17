@@ -813,6 +813,24 @@ def _get_or_create_stripe_customer(db, user_id: str, email: str) -> str:
     db.execute("UPDATE users SET stripe_customer_id = ? WHERE user_id = ?", (customer.id, user_id))
     return customer.id
 
+@app.get("/v1/pricing", tags=["Billing"])
+def get_pricing():
+    """Public pricing info. No auth required."""
+    return {
+        "tiers": [
+            {"name": "free", "price": 0, "agents": 1, "api_calls": 10000,
+             "features": ["Memory", "Queue", "Messaging", "Scheduling"]},
+            {"name": "hobby", "price": 5, "agents": 10, "api_calls": 1000000,
+             "features": ["Everything in Free", "Dead-letter queue", "Webhooks", "Marketplace", "Priority support"]},
+            {"name": "team", "price": 25, "agents": 50, "api_calls": 10000000,
+             "features": ["Everything in Hobby", "Team workspaces", "SSO (coming soon)", "SLA guarantee"]},
+            {"name": "scale", "price": 99, "agents": 200, "api_calls": -1,
+             "features": ["Everything in Team", "Unlimited API calls", "Dedicated support", "Custom integrations"]},
+        ],
+        "currency": "usd",
+        "billing_period": "monthly",
+    }
+
 class CheckoutRequest(BaseModel):
     tier: str = Field(..., description="Subscription tier: hobby, team, or scale")
 
@@ -882,7 +900,10 @@ async def stripe_webhook(request: Request):
             raise HTTPException(400, f"Webhook error: {e}")
     else:
         # No webhook secret configured — parse raw (dev/test only)
-        event = json.loads(payload)
+        try:
+            event = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            raise HTTPException(400, "Invalid webhook payload")
 
     event_type = event.get("type", "") if isinstance(event, dict) else event.type
     data_obj = event.get("data", {}).get("object", {}) if isinstance(event, dict) else event.data.object
