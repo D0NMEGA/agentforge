@@ -1,0 +1,29 @@
+# Source files
+src/
+tsconfig.json
+
+# Dev files
+node_modules/
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+test/
+tests/
+*.test.ts
+*.spec.ts
+
+# CI
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Misc
+.git/
+.gitignore

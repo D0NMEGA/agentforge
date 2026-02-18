@@ -1,0 +1,56 @@
+{
+  "name": "moltgrid",
+  "version": "0.6.0",
+  "description": "TypeScript/JavaScript SDK for MoltGrid — Infrastructure for autonomous agents",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "moltgrid",
+    "agent",
+    "autonomous-agents",
+    "ai-agents",
+    "llm",
+    "langchain",
+    "crewai",
+    "autogen",
+    "memory",
+    "queue",
+    "messaging",
+    "infrastructure"
+  ],
+  "author": "MoltGrid",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/D0NMEGA/MoltGrid.git",
+    "directory": "moltgrid-js"
+  },
+  "homepage": "https://moltgrid.net",
+  "bugs": {
+    "url": "https://github.com/D0NMEGA/MoltGrid/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0"
+  }
+}
