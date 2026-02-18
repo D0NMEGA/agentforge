@@ -1883,3 +1883,199 @@ class TestVectorMemory:
         results = r.json()["results"]
         if len(results) > 0:
             assert results[0]["key"] == "tech"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONVERSATION SESSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSessions:
+    def test_create_session(self):
+        _, _, h = register_agent("session-bot")
+        r = client.post("/v1/sessions", json={"title": "Test Session"}, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["session_id"].startswith("sess_")
+        assert d["title"] == "Test Session"
+        assert "created_at" in d
+
+    def test_create_session_defaults(self):
+        _, _, h = register_agent("session-bot")
+        r = client.post("/v1/sessions", json={}, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["session_id"].startswith("sess_")
+        assert d["title"].startswith("Session ")
+
+    def test_list_sessions(self):
+        _, _, h = register_agent("session-bot")
+        client.post("/v1/sessions", json={"title": "S1"}, headers=h)
+        client.post("/v1/sessions", json={"title": "S2"}, headers=h)
+        r = client.get("/v1/sessions", headers=h)
+        assert r.status_code == 200
+        sessions = r.json()["sessions"]
+        assert len(sessions) == 2
+
+    def test_get_session(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={"title": "Get Me"}, headers=h).json()["session_id"]
+        r = client.get(f"/v1/sessions/{sid}", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["session_id"] == sid
+        assert d["title"] == "Get Me"
+        assert d["messages"] == []
+        assert d["token_count"] == 0
+        assert d["max_tokens"] == 128000
+
+    def test_get_session_not_found(self):
+        _, _, h = register_agent("session-bot")
+        r = client.get("/v1/sessions/sess_nonexistent", headers=h)
+        assert r.status_code == 404
+
+    def test_append_message(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+        r = client.post(f"/v1/sessions/{sid}/messages", json={"role": "user", "content": "Hello!"}, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "appended"
+        assert d["message_count"] == 1
+        assert d["token_count"] > 0
+        assert d["summarized"] is False
+
+    def test_append_multiple_roles(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+        client.post(f"/v1/sessions/{sid}/messages", json={"role": "system", "content": "You are a helper."}, headers=h)
+        client.post(f"/v1/sessions/{sid}/messages", json={"role": "user", "content": "Hi"}, headers=h)
+        client.post(f"/v1/sessions/{sid}/messages", json={"role": "assistant", "content": "Hello!"}, headers=h)
+
+        r = client.get(f"/v1/sessions/{sid}", headers=h)
+        msgs = r.json()["messages"]
+        assert len(msgs) == 3
+        assert msgs[0]["role"] == "system"
+        assert msgs[1]["role"] == "user"
+        assert msgs[2]["role"] == "assistant"
+
+    def test_append_invalid_role(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+        r = client.post(f"/v1/sessions/{sid}/messages", json={"role": "admin", "content": "Hi"}, headers=h)
+        assert r.status_code == 422
+
+    def test_auto_summarize_on_overflow(self):
+        _, _, h = register_agent("session-bot")
+        # Create session with very low max_tokens to trigger summarization
+        sid = client.post("/v1/sessions", json={"title": "Small", "max_tokens": 1000}, headers=h).json()["session_id"]
+
+        # Add enough messages to exceed 90% of 1000 tokens
+        for i in range(20):
+            client.post(f"/v1/sessions/{sid}/messages", json={
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"Message number {i}. " + "x" * 200,
+            }, headers=h)
+
+        # Check that summarization happened
+        r = client.get(f"/v1/sessions/{sid}", headers=h)
+        d = r.json()
+        msgs = d["messages"]
+        # After summarization, should have system summary + last 10
+        assert len(msgs) <= 12  # system msgs + summary + 10 recent
+        # Should contain a summary message
+        has_summary = any("Summary of previous conversation" in m.get("content", "") for m in msgs)
+        assert has_summary
+
+    def test_force_summarize(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+
+        # Add 15 messages
+        for i in range(15):
+            client.post(f"/v1/sessions/{sid}/messages", json={
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"Turn {i}: Some conversation content here.",
+            }, headers=h)
+
+        r = client.post(f"/v1/sessions/{sid}/summarize", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "summarized"
+        assert d["original_message_count"] == 15
+        assert d["new_message_count"] < 15
+        assert d["token_count"] > 0
+
+        # Verify the session now has summary + recent messages
+        r2 = client.get(f"/v1/sessions/{sid}", headers=h)
+        msgs = r2.json()["messages"]
+        has_summary = any("Summary of previous conversation" in m.get("content", "") for m in msgs)
+        assert has_summary
+
+    def test_summarize_not_found(self):
+        _, _, h = register_agent("session-bot")
+        r = client.post("/v1/sessions/sess_nonexistent/summarize", headers=h)
+        assert r.status_code == 404
+
+    def test_delete_session(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={"title": "Delete Me"}, headers=h).json()["session_id"]
+        r = client.delete(f"/v1/sessions/{sid}", headers=h)
+        assert r.status_code == 200
+        assert r.json()["status"] == "deleted"
+
+        # Verify it's gone
+        r2 = client.get(f"/v1/sessions/{sid}", headers=h)
+        assert r2.status_code == 404
+
+    def test_delete_session_not_found(self):
+        _, _, h = register_agent("session-bot")
+        r = client.delete("/v1/sessions/sess_nonexistent", headers=h)
+        assert r.status_code == 404
+
+    def test_session_isolation(self):
+        """Sessions should be scoped to the owning agent."""
+        _, _, h1 = register_agent("agent-1")
+        _, _, h2 = register_agent("agent-2")
+
+        sid = client.post("/v1/sessions", json={"title": "Private"}, headers=h1).json()["session_id"]
+
+        # Agent 2 cannot access agent 1's session
+        assert client.get(f"/v1/sessions/{sid}", headers=h2).status_code == 404
+        assert client.post(f"/v1/sessions/{sid}/messages", json={"role": "user", "content": "Hi"}, headers=h2).status_code == 404
+        assert client.delete(f"/v1/sessions/{sid}", headers=h2).status_code == 404
+
+    def test_summarize_preserves_system_messages(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+
+        # Add a system message first
+        client.post(f"/v1/sessions/{sid}/messages", json={
+            "role": "system", "content": "You are a helpful assistant."
+        }, headers=h)
+
+        # Add 14 more messages
+        for i in range(14):
+            client.post(f"/v1/sessions/{sid}/messages", json={
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"Message {i}",
+            }, headers=h)
+
+        r = client.post(f"/v1/sessions/{sid}/summarize", headers=h)
+        assert r.status_code == 200
+
+        msgs = client.get(f"/v1/sessions/{sid}", headers=h).json()["messages"]
+        # Original system message should be preserved
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"] == "You are a helpful assistant."
+
+    def test_token_count_updates(self):
+        _, _, h = register_agent("session-bot")
+        sid = client.post("/v1/sessions", json={}, headers=h).json()["session_id"]
+
+        r1 = client.post(f"/v1/sessions/{sid}/messages", json={"role": "user", "content": "Hello world"}, headers=h)
+        count1 = r1.json()["token_count"]
+        assert count1 > 0
+
+        r2 = client.post(f"/v1/sessions/{sid}/messages", json={"role": "assistant", "content": "Hi there, how can I help?"}, headers=h)
+        count2 = r2.json()["token_count"]
+        assert count2 > count1

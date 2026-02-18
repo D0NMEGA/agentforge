@@ -442,5 +442,36 @@ class MoltGrid:
         """List all vector keys in a namespace (without embeddings)."""
         return self._get("/v1/vector", namespace=namespace, limit=limit)
 
+    # ── Sessions ──────────────────────────────────────────────────────────────
+
+    def session_create(self, title=None, max_tokens=128000):
+        """Create a new conversation session for bundled context."""
+        body = {"max_tokens": max_tokens}
+        if title:
+            body["title"] = title
+        return self._post("/v1/sessions", json=body)
+
+    def session_list(self):
+        """List all sessions for this agent."""
+        return self._get("/v1/sessions")
+
+    def session_get(self, session_id):
+        """Get a session with its full message history."""
+        return self._get(f"/v1/sessions/{session_id}")
+
+    def session_append(self, session_id, role, content):
+        """Append a message to a session. Auto-summarizes if near token limit."""
+        return self._post(f"/v1/sessions/{session_id}/messages", json={
+            "role": role, "content": content,
+        })
+
+    def session_summarize(self, session_id):
+        """Force-summarize a session: collapse history to summary + recent 10."""
+        return self._post(f"/v1/sessions/{session_id}/summarize")
+
+    def session_delete(self, session_id):
+        """Delete a session."""
+        return self._delete(f"/v1/sessions/{session_id}")
+
     def __repr__(self):
         return f"MoltGrid(base_url={self.base_url!r})"

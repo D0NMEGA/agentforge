@@ -388,6 +388,20 @@ def init_db():
             error TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_email_queue_status ON email_queue(status, created_at);
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            title TEXT,
+            messages TEXT NOT NULL DEFAULT '[]',
+            metadata TEXT,
+            token_count INTEGER DEFAULT 0,
+            max_tokens INTEGER DEFAULT 128000,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -3957,6 +3971,178 @@ def stats(agent_id: str = Depends(get_agent_id)):
         "marketplace_tasks_created": market_created,
         "marketplace_tasks_completed": market_completed,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CONVERSATION SESSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SessionCreateRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=256)
+    max_tokens: int = Field(128000, ge=1000, le=1000000)
+
+class SessionAppendRequest(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant|system)$")
+    content: str = Field(..., min_length=1, max_length=1000000)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token."""
+    return max(1, len(text) // 4)
+
+
+def _auto_summarize(messages: list) -> list:
+    """MVP auto-summarization: keep system msgs + last 10, summarize the rest."""
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    non_system = [m for m in messages if m.get("role") != "system"]
+
+    if len(non_system) <= 10:
+        return messages
+
+    keep = non_system[-10:]
+    trimmed = non_system[:-10]
+
+    # Build summary: first message + count + last 5 of trimmed block
+    parts = []
+    if trimmed:
+        parts.append(trimmed[0].get("content", "")[:200])
+    if len(trimmed) > 5:
+        parts.append(f"... [{len(trimmed)} messages trimmed] ...")
+        for m in trimmed[-5:]:
+            parts.append(f"{m.get('role', 'user')}: {m.get('content', '')[:100]}")
+    elif len(trimmed) > 1:
+        parts.append(f"... [{len(trimmed)} messages trimmed] ...")
+
+    summary_text = "Summary of previous conversation: " + "\n".join(parts)
+    summary_msg = {"role": "system", "content": summary_text}
+
+    return system_msgs + [summary_msg] + keep
+
+
+@app.post("/v1/sessions", tags=["Sessions"])
+def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_id)):
+    """Create a new conversation session."""
+    now = datetime.now(timezone.utc).isoformat()
+    session_id = f"sess_{uuid.uuid4().hex[:16]}"
+    title = req.title or f"Session {now[:10]}"
+
+    with get_db() as db:
+        db.execute("""
+            INSERT INTO sessions (session_id, agent_id, title, messages, metadata, token_count, max_tokens, created_at, updated_at)
+            VALUES (?, ?, ?, '[]', NULL, 0, ?, ?, ?)
+        """, (session_id, agent_id, title, req.max_tokens, now, now))
+
+    return {"session_id": session_id, "title": title, "created_at": now}
+
+
+@app.get("/v1/sessions", tags=["Sessions"])
+def session_list(agent_id: str = Depends(get_agent_id)):
+    """List all sessions for this agent."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT session_id, title, token_count, max_tokens, created_at, updated_at FROM sessions WHERE agent_id=? ORDER BY updated_at DESC",
+            (agent_id,)
+        ).fetchall()
+    return {"sessions": [dict(r) for r in rows]}
+
+
+@app.get("/v1/sessions/{session_id}", tags=["Sessions"])
+def session_get(session_id: str, agent_id: str = Depends(get_agent_id)):
+    """Get a session with its full message history."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT * FROM sessions WHERE session_id=? AND agent_id=?",
+            (session_id, agent_id)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Session not found")
+    d = dict(row)
+    d["messages"] = json.loads(d["messages"])
+    return d
+
+
+@app.post("/v1/sessions/{session_id}/messages", tags=["Sessions"])
+def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = Depends(get_agent_id)):
+    """Append a message to a session. Auto-summarizes if near token limit."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT messages, token_count, max_tokens FROM sessions WHERE session_id=? AND agent_id=?",
+            (session_id, agent_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Session not found")
+
+        messages = json.loads(row["messages"])
+        token_count = row["token_count"]
+        max_tokens = row["max_tokens"]
+
+        new_msg = {"role": req.role, "content": req.content}
+        messages.append(new_msg)
+        token_count += _estimate_tokens(req.content)
+
+        summarized = False
+        if token_count > max_tokens * 0.9:
+            messages = _auto_summarize(messages)
+            token_count = sum(_estimate_tokens(m.get("content", "")) for m in messages)
+            summarized = True
+
+        db.execute(
+            "UPDATE sessions SET messages=?, token_count=?, updated_at=? WHERE session_id=? AND agent_id=?",
+            (json.dumps(messages), token_count, now, session_id, agent_id)
+        )
+
+    return {
+        "status": "appended",
+        "message_count": len(messages),
+        "token_count": token_count,
+        "summarized": summarized,
+    }
+
+
+@app.post("/v1/sessions/{session_id}/summarize", tags=["Sessions"])
+def session_summarize(session_id: str, agent_id: str = Depends(get_agent_id)):
+    """Force-summarize a session: collapse history to summary + recent 10 messages."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        row = db.execute(
+            "SELECT messages FROM sessions WHERE session_id=? AND agent_id=?",
+            (session_id, agent_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Session not found")
+
+        messages = json.loads(row["messages"])
+        original_count = len(messages)
+        messages = _auto_summarize(messages)
+        token_count = sum(_estimate_tokens(m.get("content", "")) for m in messages)
+
+        db.execute(
+            "UPDATE sessions SET messages=?, token_count=?, updated_at=? WHERE session_id=? AND agent_id=?",
+            (json.dumps(messages), token_count, now, session_id, agent_id)
+        )
+
+    return {
+        "status": "summarized",
+        "original_message_count": original_count,
+        "new_message_count": len(messages),
+        "token_count": token_count,
+    }
+
+
+@app.delete("/v1/sessions/{session_id}", tags=["Sessions"])
+def session_delete(session_id: str, agent_id: str = Depends(get_agent_id)):
+    """Delete a session."""
+    with get_db() as db:
+        r = db.execute(
+            "DELETE FROM sessions WHERE session_id=? AND agent_id=?",
+            (session_id, agent_id)
+        )
+        if r.rowcount == 0:
+            raise HTTPException(404, "Session not found")
+    return {"status": "deleted", "session_id": session_id}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
