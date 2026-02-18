@@ -442,6 +442,16 @@ class MoltGrid:
         """List all vector keys in a namespace (without embeddings)."""
         return self._get("/v1/vector", namespace=namespace, limit=limit)
 
+    # ── Key Rotation ─────────────────────────────────────────────────────────
+
+    def rotate_key(self):
+        """Rotate this agent's API key. Returns new key; old key is immediately invalid.
+        IMPORTANT: Update your client with the new key after calling this."""
+        data = self._post("/v1/agents/rotate-key")
+        self.api_key = data["api_key"]
+        self._s.headers.update({"X-API-Key": data["api_key"]})
+        return data
+
     # ── Sessions ──────────────────────────────────────────────────────────────
 
     def session_create(self, title=None, max_tokens=128000):

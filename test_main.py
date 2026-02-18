@@ -66,6 +66,31 @@ class TestRegistration:
         r = client.get("/v1/memory")
         assert r.status_code == 401
 
+    def test_rotate_api_key(self):
+        aid, old_key, h = register_agent("rotate-me")
+        # Store some data first
+        client.post("/v1/memory", json={"key": "persist", "value": "survives"}, headers=h)
+
+        # Rotate key
+        r = client.post("/v1/agents/rotate-key", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "rotated"
+        assert d["agent_id"] == aid
+        assert d["api_key"].startswith("af_")
+        assert d["api_key"] != old_key
+
+        new_h = {"X-API-Key": d["api_key"]}
+
+        # Old key should be invalid
+        r2 = client.get("/v1/memory/persist", headers=h)
+        assert r2.status_code == 401
+
+        # New key should work and data should still be there
+        r3 = client.get("/v1/memory/persist", headers=new_h)
+        assert r3.status_code == 200
+        assert r3.json()["value"] == "survives"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MEMORY

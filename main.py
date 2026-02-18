@@ -1274,6 +1274,23 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
     )
 
 
+@app.post("/v1/agents/rotate-key", tags=["Auth"])
+def rotate_api_key(agent_id: str = Depends(get_agent_id)):
+    """Rotate the agent's API key. Returns the new key once; old key is immediately invalid."""
+    new_key = generate_api_key()
+    with get_db() as db:
+        db.execute(
+            "UPDATE agents SET api_key_hash=? WHERE agent_id=?",
+            (hash_key(new_key), agent_id)
+        )
+    return {
+        "status": "rotated",
+        "agent_id": agent_id,
+        "api_key": new_key,
+        "message": "Store your new API key securely. The old key is now invalid.",
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ONBOARDING
 # ═══════════════════════════════════════════════════════════════════════════════
