@@ -2195,3 +2195,58 @@ class TestSessions:
         r2 = client.post(f"/v1/sessions/{sid}/messages", json={"role": "assistant", "content": "Hi there, how can I help?"}, headers=h)
         count2 = r2.json()["token_count"]
         assert count2 > count1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESPONSE HEADERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestResponseHeaders:
+    def test_request_id_on_public_endpoint(self):
+        r = client.get("/v1/health")
+        assert r.status_code == 200
+        assert "x-request-id" in r.headers
+        assert len(r.headers["x-request-id"]) == 32  # uuid4 hex
+
+    def test_version_header(self):
+        r = client.get("/v1/health")
+        assert r.headers["x-moltgrid-version"] == "0.7.0"
+
+    def test_rate_limit_headers_on_authenticated(self):
+        _, _, h = register_agent()
+        r = client.get("/v1/memory", headers=h)
+        assert "x-ratelimit-limit" in r.headers
+        assert r.headers["x-ratelimit-limit"] == "120"
+        assert "x-ratelimit-remaining" in r.headers
+        remaining = int(r.headers["x-ratelimit-remaining"])
+        assert 0 <= remaining <= 120
+        assert "x-ratelimit-reset" in r.headers
+        reset = int(r.headers["x-ratelimit-reset"])
+        assert reset > 0
+
+    def test_rate_limit_remaining_decreases(self):
+        _, _, h = register_agent()
+        r1 = client.get("/v1/memory", headers=h)
+        rem1 = int(r1.headers["x-ratelimit-remaining"])
+
+        r2 = client.get("/v1/memory", headers=h)
+        rem2 = int(r2.headers["x-ratelimit-remaining"])
+        assert rem2 < rem1
+
+    def test_request_id_unique_per_request(self):
+        r1 = client.get("/v1/health")
+        r2 = client.get("/v1/health")
+        assert r1.headers["x-request-id"] != r2.headers["x-request-id"]
+
+    def test_headers_on_error_response(self):
+        r = client.get("/v1/memory")  # No API key = 401
+        assert r.status_code == 401
+        assert "x-request-id" in r.headers
+        assert "x-moltgrid-version" in r.headers
+
+    def test_cors_headers(self):
+        r = client.options("/v1/health", headers={
+            "Origin": "https://example.com",
+            "Access-Control-Request-Method": "GET",
+        })
+        assert "access-control-allow-origin" in r.headers

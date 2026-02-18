@@ -118,7 +118,7 @@ app = FastAPI(
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
@@ -127,7 +127,31 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "X-MoltGrid-Version"],
 )
+
+
+@app.middleware("http")
+async def add_response_headers(request: Request, call_next):
+    """Add X-Request-ID, X-MoltGrid-Version, and rate limit headers to every response."""
+    request_id = uuid.uuid4().hex
+    request.state.request_id = request_id
+    request.state.rate_limit_remaining = None
+    request.state.rate_limit_reset = None
+
+    response = await call_next(request)
+
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-MoltGrid-Version"] = app.version
+    response.headers["X-RateLimit-Limit"] = str(RATE_LIMIT_MAX)
+
+    if request.state.rate_limit_remaining is not None:
+        response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
+    if request.state.rate_limit_reset is not None:
+        response.headers["X-RateLimit-Reset"] = str(request.state.rate_limit_reset)
+
+    return response
+
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 def init_db():
@@ -587,7 +611,10 @@ async def get_agent_id(request: Request) -> str:
             "SELECT count FROM rate_limits WHERE agent_id = ? AND window_start = ?",
             (row["agent_id"], window)
         ).fetchone()
-        if rl and rl["count"] > RATE_LIMIT_MAX:
+        current_count = rl["count"] if rl else 0
+        request.state.rate_limit_remaining = max(0, RATE_LIMIT_MAX - current_count)
+        request.state.rate_limit_reset = (window + 1) * RATE_LIMIT_WINDOW
+        if current_count > RATE_LIMIT_MAX:
             raise HTTPException(429, f"Rate limit exceeded ({RATE_LIMIT_MAX}/min)")
 
         # Usage quota check (per owner's subscription tier)
