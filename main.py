@@ -3619,7 +3619,7 @@ def admin_dashboard(_: bool = Depends(_verify_admin_session)):
             "test_scenarios": scenario_count,
             "contact_submissions": contact_count,
         },
-        "version": "0.6.0",
+        "version": app.version,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "encryption_enabled": _fernet is not None,
     }
@@ -4061,7 +4061,7 @@ def health():
 
     return {
         "status": "operational",
-        "version": "0.6.0",
+        "version": app.version,
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -4349,7 +4349,7 @@ def submit_contact(form: ContactForm):
 def root():
     return {
         "service": "MoltGrid",
-        "version": "0.6.0",
+        "version": app.version,
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {
