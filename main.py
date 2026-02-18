@@ -100,7 +100,8 @@ async def lifespan(app):
     threading.Thread(target=_liveness_loop, daemon=True).start()
     threading.Thread(target=_usage_reset_loop, daemon=True).start()
     threading.Thread(target=_email_loop, daemon=True).start()
-    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset, email)")
+    threading.Thread(target=_webhook_delivery_loop, daemon=True).start()
+    logger.info("Background threads started (scheduler, uptime monitor, liveness monitor, usage reset, email, webhook delivery)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
     app.openapi_schema = None
     logger.info("OpenAPI schema cache cleared")
@@ -402,6 +403,22 @@ def init_db():
             FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_id);
+
+        CREATE TABLE IF NOT EXISTS webhook_deliveries (
+            delivery_id TEXT PRIMARY KEY,
+            webhook_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            attempt_count INTEGER DEFAULT 0,
+            max_attempts INTEGER DEFAULT 3,
+            next_retry_at TEXT,
+            last_error TEXT,
+            created_at TEXT NOT NULL,
+            delivered_at TEXT,
+            FOREIGN KEY (webhook_id) REFERENCES webhooks(webhook_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_webhook_del_status ON webhook_deliveries(status, next_retry_at);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
@@ -1914,35 +1931,81 @@ def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
 
 
 def _fire_webhooks(agent_id: str, event_type: str, data: dict):
-    """Fire webhooks for an agent in a background thread. Best-effort delivery."""
+    """Queue webhook deliveries for an agent. Delivery happens via background worker with retries."""
+    now = datetime.now(timezone.utc).isoformat()
+    body = json.dumps({"event": event_type, "data": data, "timestamp": now})
+
     with get_db() as db:
         rows = db.execute(
-            "SELECT webhook_id, url, secret, event_types FROM webhooks WHERE agent_id=? AND active=1",
+            "SELECT webhook_id, event_types FROM webhooks WHERE agent_id=? AND active=1",
             (agent_id,)
         ).fetchall()
 
-    matching = []
-    for r in rows:
-        if event_type in json.loads(r["event_types"]):
-            matching.append({"webhook_id": r["webhook_id"], "url": r["url"], "secret": r["secret"]})
+        for r in rows:
+            if event_type in json.loads(r["event_types"]):
+                delivery_id = f"whd_{uuid.uuid4().hex[:16]}"
+                db.execute(
+                    "INSERT INTO webhook_deliveries (delivery_id, webhook_id, event_type, payload, status, attempt_count, max_attempts, next_retry_at, created_at) "
+                    "VALUES (?, ?, ?, ?, 'pending', 0, 3, ?, ?)",
+                    (delivery_id, r["webhook_id"], event_type, body, now, now)
+                )
 
-    if not matching:
-        return
 
-    def deliver():
-        body = json.dumps({"event": event_type, "data": data, "timestamp": datetime.now(timezone.utc).isoformat()})
-        for wh in matching:
+def _webhook_delivery_loop():
+    """Background thread: process pending webhook deliveries every 15 seconds."""
+    while True:
+        try:
+            _run_webhook_delivery_tick()
+        except Exception as e:
+            logger.error(f"Webhook delivery loop error: {e}")
+        time.sleep(15)
+
+
+def _run_webhook_delivery_tick():
+    """Attempt delivery for pending webhooks whose next_retry_at has passed."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    with get_db() as db:
+        pending = db.execute(
+            "SELECT d.delivery_id, d.webhook_id, d.event_type, d.payload, d.attempt_count, d.max_attempts, "
+            "w.url, w.secret "
+            "FROM webhook_deliveries d JOIN webhooks w ON d.webhook_id = w.webhook_id "
+            "WHERE d.status='pending' AND d.next_retry_at <= ? "
+            "ORDER BY d.next_retry_at ASC LIMIT 20",
+            (now,)
+        ).fetchall()
+
+        for row in pending:
+            delivery_id = row["delivery_id"]
+            attempt = row["attempt_count"] + 1
+            body = row["payload"]
+
             try:
-                headers = {"Content-Type": "application/json", "X-MoltGrid-Event": event_type}
-                if wh["secret"]:
-                    sig = _hmac.new(wh["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
+                headers = {"Content-Type": "application/json", "X-MoltGrid-Event": row["event_type"]}
+                if row["secret"]:
+                    sig = _hmac.new(row["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
                     headers["X-MoltGrid-Signature"] = sig
-                with httpx.Client(timeout=WEBHOOK_TIMEOUT) as client:
-                    client.post(wh["url"], content=body, headers=headers)
-            except Exception as e:
-                logger.warning(f"Webhook delivery failed for {wh['webhook_id']}: {e}")
+                with httpx.Client(timeout=WEBHOOK_TIMEOUT) as hc:
+                    resp = hc.post(row["url"], content=body, headers=headers)
+                    resp.raise_for_status()
 
-    threading.Thread(target=deliver, daemon=True).start()
+                db.execute(
+                    "UPDATE webhook_deliveries SET status='delivered', attempt_count=?, delivered_at=? WHERE delivery_id=?",
+                    (attempt, datetime.now(timezone.utc).isoformat(), delivery_id)
+                )
+            except Exception as e:
+                if attempt >= row["max_attempts"]:
+                    db.execute(
+                        "UPDATE webhook_deliveries SET status='failed', attempt_count=?, last_error=? WHERE delivery_id=?",
+                        (attempt, str(e)[:500], delivery_id)
+                    )
+                else:
+                    retry_seconds = 60 * (2 ** attempt)
+                    next_retry = (datetime.now(timezone.utc) + timedelta(seconds=retry_seconds)).isoformat()
+                    db.execute(
+                        "UPDATE webhook_deliveries SET attempt_count=?, next_retry_at=?, last_error=? WHERE delivery_id=?",
+                        (attempt, next_retry, str(e)[:500], delivery_id)
+                    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3560,6 +3623,41 @@ def admin_messages(
     for m in messages:
         m["payload"] = _decrypt(m["payload"])
     return {"messages": messages, "total": total, "limit": limit, "offset": offset}
+
+@app.get("/admin/api/webhook-deliveries", tags=["Admin"])
+def admin_webhook_deliveries(
+    limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
+    status: Optional[str] = None,
+    webhook_id: Optional[str] = None,
+    _: bool = Depends(_verify_admin_session),
+):
+    """Browse webhook delivery log with optional status/webhook filters."""
+    with get_db() as db:
+        where_clauses = []
+        params = []
+        if status:
+            where_clauses.append("d.status=?")
+            params.append(status)
+        if webhook_id:
+            where_clauses.append("d.webhook_id=?")
+            params.append(webhook_id)
+        where = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        rows = db.execute(
+            f"SELECT d.*, w.url, w.agent_id FROM webhook_deliveries d "
+            f"LEFT JOIN webhooks w ON d.webhook_id = w.webhook_id "
+            f"{where} ORDER BY d.created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset]
+        ).fetchall()
+
+        count_params = list(params)
+        total = db.execute(
+            f"SELECT COUNT(*) as c FROM webhook_deliveries d {where}",
+            count_params
+        ).fetchone()["c"]
+
+    return {"deliveries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @app.get("/admin/api/memory", tags=["Admin"])
 def admin_memory(

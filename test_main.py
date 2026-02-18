@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
 
 from fastapi.testclient import TestClient
-from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick, _run_liveness_check
+from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick, _run_liveness_check, _run_webhook_delivery_tick
 
 client = TestClient(app)
 
@@ -327,9 +327,9 @@ class TestWebhooks:
         _, _, h = register_agent()
         assert client.delete("/v1/webhooks/wh_fake", headers=h).status_code == 404
 
-    def test_fire_webhooks_delivery(self):
-        """Test that _fire_webhooks posts to matching webhook URLs."""
-        from main import _fire_webhooks
+    def test_fire_webhooks_queues_delivery(self):
+        """Test that _fire_webhooks inserts into webhook_deliveries."""
+        from main import _fire_webhooks, get_db
 
         _, _, h = register_agent()
         client.post("/v1/webhooks", json={
@@ -338,22 +338,21 @@ class TestWebhooks:
             "secret": "mysecret",
         }, headers=h)
 
-        # Get the agent_id from headers
         aid = client.get("/v1/stats", headers=h).json()["agent_id"]
+        _fire_webhooks(aid, "message.received", {"test": "data"})
 
-        with patch("main.httpx.Client") as MockClient:
-            mock_instance = MagicMock()
-            MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
-            MockClient.return_value.__exit__ = MagicMock(return_value=False)
-
-            _fire_webhooks(aid, "message.received", {"test": "data"})
-            # Give the thread a moment to run
-            time.sleep(0.5)
-            mock_instance.post.assert_called_once()
+        with get_db() as db:
+            rows = db.execute("SELECT * FROM webhook_deliveries").fetchall()
+        assert len(rows) == 1
+        d = dict(rows[0])
+        assert d["status"] == "pending"
+        assert d["attempt_count"] == 0
+        assert d["event_type"] == "message.received"
+        assert '"test"' in d["payload"]
 
     def test_fire_webhooks_no_match(self):
-        """Webhooks not matching event type should not fire."""
-        from main import _fire_webhooks
+        """Webhooks not matching event type should not queue a delivery."""
+        from main import _fire_webhooks, get_db
 
         _, _, h = register_agent()
         client.post("/v1/webhooks", json={
@@ -362,26 +361,118 @@ class TestWebhooks:
         }, headers=h)
 
         aid = client.get("/v1/stats", headers=h).json()["agent_id"]
+        _fire_webhooks(aid, "message.received", {"test": "data"})
 
-        with patch("main.threading.Thread") as mock_thread:
-            _fire_webhooks(aid, "message.received", {"test": "data"})
-            # No matching hooks, thread should NOT start
-            mock_thread.assert_not_called()
+        with get_db() as db:
+            rows = db.execute("SELECT * FROM webhook_deliveries").fetchall()
+        assert len(rows) == 0
 
-    def test_relay_send_fires_webhook(self):
+    def test_delivery_tick_success(self):
+        """Test that _run_webhook_delivery_tick delivers pending webhooks."""
+        from main import _fire_webhooks
+
+        _, _, h = register_agent()
+        client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["message.received"],
+        }, headers=h)
+
+        aid = client.get("/v1/stats", headers=h).json()["agent_id"]
+        _fire_webhooks(aid, "message.received", {"test": "data"})
+
+        with patch("main.httpx.Client") as MockClient:
+            mock_instance = MagicMock()
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_instance.post.return_value = mock_response
+            MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+            _run_webhook_delivery_tick()
+            mock_instance.post.assert_called_once()
+
+        from main import get_db
+        with get_db() as db:
+            row = db.execute("SELECT * FROM webhook_deliveries").fetchone()
+        assert dict(row)["status"] == "delivered"
+        assert dict(row)["attempt_count"] == 1
+
+    def test_delivery_tick_retry_on_failure(self):
+        """Test that failed deliveries get retried with exponential backoff."""
+        from main import _fire_webhooks, get_db
+
+        _, _, h = register_agent()
+        client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["job.completed"],
+        }, headers=h)
+
+        aid = client.get("/v1/stats", headers=h).json()["agent_id"]
+        _fire_webhooks(aid, "job.completed", {"job_id": "j1"})
+
+        with patch("main.httpx.Client") as MockClient:
+            mock_instance = MagicMock()
+            mock_instance.post.side_effect = Exception("Connection refused")
+            MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+            _run_webhook_delivery_tick()
+
+        with get_db() as db:
+            row = dict(db.execute("SELECT * FROM webhook_deliveries").fetchone())
+        assert row["status"] == "pending"
+        assert row["attempt_count"] == 1
+        assert row["last_error"] == "Connection refused"
+        assert row["next_retry_at"] is not None
+
+    def test_delivery_tick_fails_after_max_attempts(self):
+        """Test that deliveries are marked failed after max_attempts."""
+        from main import _fire_webhooks, get_db
+
+        _, _, h = register_agent()
+        client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["job.completed"],
+        }, headers=h)
+
+        aid = client.get("/v1/stats", headers=h).json()["agent_id"]
+        _fire_webhooks(aid, "job.completed", {"job_id": "j1"})
+
+        # Set attempt_count to max_attempts - 1 so next failure = final
+        with get_db() as db:
+            db.execute("UPDATE webhook_deliveries SET attempt_count=2")
+
+        with patch("main.httpx.Client") as MockClient:
+            mock_instance = MagicMock()
+            mock_instance.post.side_effect = Exception("Timeout")
+            MockClient.return_value.__enter__ = MagicMock(return_value=mock_instance)
+            MockClient.return_value.__exit__ = MagicMock(return_value=False)
+
+            _run_webhook_delivery_tick()
+
+        with get_db() as db:
+            row = dict(db.execute("SELECT * FROM webhook_deliveries").fetchone())
+        assert row["status"] == "failed"
+        assert row["attempt_count"] == 3
+        assert "Timeout" in row["last_error"]
+
+    def test_relay_send_queues_webhook(self):
+        """Test that sending a relay message queues a webhook delivery."""
+        from main import get_db
+
         id1, _, h1 = register_agent("sender")
         id2, _, h2 = register_agent("receiver")
 
-        # Receiver registers a webhook
         client.post("/v1/webhooks", json={
             "url": "https://example.com/hook",
             "event_types": ["message.received"],
         }, headers=h2)
 
-        with patch("main.threading.Thread") as mock_thread:
-            mock_thread.return_value = MagicMock()
-            client.post("/v1/relay/send", json={"to_agent": id2, "payload": "hi"}, headers=h1)
-            assert mock_thread.called
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "hi"}, headers=h1)
+
+        with get_db() as db:
+            rows = db.execute("SELECT * FROM webhook_deliveries WHERE event_type='message.received'").fetchall()
+        assert len(rows) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
