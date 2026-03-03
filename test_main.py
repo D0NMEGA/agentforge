@@ -2741,3 +2741,220 @@ class TestMemoryVisibilitySchema:
         client.post("/v1/memory", json={"key": "shared_own", "value": "sv", "visibility": "shared"}, headers=h)
         r = client.get("/v1/memory/shared_own", headers=h)
         assert r.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MEMORY VISIBILITY ENDPOINT (MEM-05)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMemoryVisibilityEndpoint:
+    """
+    Verifies PATCH /v1/memory/{key}/visibility endpoint (MEM-05):
+    - Returns 200 with {"status":"updated","key","visibility"} on success
+    - Returns 404 for nonexistent key
+    - Changing to public allows cross-agent reads (200)
+    - Changing to private blocks cross-agent reads (403)
+    - shared visibility with shared_agents list is stored and enforced
+    - Invalid visibility value coerces to 'private'
+    """
+
+    def test_agent_can_change_own_memory_to_public(self):
+        """PATCH /v1/memory/{key}/visibility returns 200 and updates visibility to public."""
+        _, _, h = register_agent("vis-owner-pub")
+        client.post("/v1/memory", json={"key": "mykey", "value": "val", "visibility": "private"}, headers=h)
+        r = client.patch(
+            "/v1/memory/mykey/visibility",
+            json={"namespace": "default", "key": "mykey", "visibility": "public", "shared_agents": []},
+            headers=h,
+        )
+        assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text}"
+        body = r.json()
+        assert body["status"] == "updated"
+        assert body["key"] == "mykey"
+        assert body["visibility"] == "public"
+
+    def test_agent_can_change_own_memory_to_shared(self):
+        """PATCH /v1/memory/{key}/visibility with shared visibility stores shared_agents correctly."""
+        aid1, _, h1 = register_agent("vis-owner-shared")
+        aid2, _, _ = register_agent("vis-shared-peer")
+        client.post("/v1/memory", json={"key": "sharedkey", "value": "sv", "visibility": "private"}, headers=h1)
+        r = client.patch(
+            "/v1/memory/sharedkey/visibility",
+            json={"namespace": "default", "key": "sharedkey", "visibility": "shared", "shared_agents": [aid2]},
+            headers=h1,
+        )
+        assert r.status_code == 200
+        assert r.json()["visibility"] == "shared"
+        # Verify the shared agent can now read it
+        h2 = {"X-API-Key": client.post("/v1/register", json={"name": "vis-shared-peer-reader"}).json()["api_key"]}
+        # aid2 should be able to read it
+        import sqlite3
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT shared_agents FROM memory WHERE key='sharedkey'",
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        import json as _json
+        sa = _json.loads(row["shared_agents"] or "[]")
+        assert aid2 in sa, f"shared_agents should contain {aid2}, got {sa}"
+
+    def test_patch_nonexistent_key_returns_404(self):
+        """PATCH /v1/memory/{key}/visibility returns 404 when key does not exist."""
+        _, _, h = register_agent("vis-404")
+        r = client.patch(
+            "/v1/memory/no_such_key/visibility",
+            json={"namespace": "default", "key": "no_such_key", "visibility": "public", "shared_agents": []},
+            headers=h,
+        )
+        assert r.status_code == 404, f"Expected 404, got {r.status_code}: {r.text}"
+
+    def test_invalid_visibility_coerces_to_private(self):
+        """PATCH /v1/memory/{key}/visibility with unknown visibility coerces to 'private'."""
+        _, _, h = register_agent("vis-coerce")
+        client.post("/v1/memory", json={"key": "coercekey", "value": "v", "visibility": "public"}, headers=h)
+        r = client.patch(
+            "/v1/memory/coercekey/visibility",
+            json={"namespace": "default", "key": "coercekey", "visibility": "unknown_val", "shared_agents": []},
+            headers=h,
+        )
+        assert r.status_code == 200
+        assert r.json()["visibility"] == "private", "Invalid visibility should coerce to 'private'"
+
+    def test_patch_visibility_changes_cross_agent_access(self):
+        """Setting public -> cross-agent read returns 200; setting private -> 403."""
+        aid1, _, h1 = register_agent("vis-owner-cross")
+        _, _, h2 = register_agent("vis-requester-cross")
+        # Store as private
+        client.post("/v1/memory", json={"key": "crosskey", "value": "cval", "visibility": "private"}, headers=h1)
+        # Cross-agent read must return 403 initially
+        r_denied = client.get(f"/v1/agents/{aid1}/memory/crosskey", headers=h2)
+        assert r_denied.status_code == 403, f"Expected 403 for private key, got {r_denied.status_code}"
+        # PATCH to public
+        client.patch(
+            "/v1/memory/crosskey/visibility",
+            json={"namespace": "default", "key": "crosskey", "visibility": "public", "shared_agents": []},
+            headers=h1,
+        )
+        # Cross-agent read must return 200 now
+        r_allowed = client.get(f"/v1/agents/{aid1}/memory/crosskey", headers=h2)
+        assert r_allowed.status_code == 200, f"Expected 200 for public key, got {r_allowed.status_code}"
+        assert r_allowed.json()["value"] == "cval"
+        # PATCH back to private
+        client.patch(
+            "/v1/memory/crosskey/visibility",
+            json={"namespace": "default", "key": "crosskey", "visibility": "private", "shared_agents": []},
+            headers=h1,
+        )
+        # Cross-agent read must return 403 again
+        r_denied2 = client.get(f"/v1/agents/{aid1}/memory/crosskey", headers=h2)
+        assert r_denied2.status_code == 403, f"Expected 403 after setting private, got {r_denied2.status_code}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MEMORY AUDIT LOG (MEM-08)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMemoryAuditLog:
+    """
+    Verifies memory_access_log is populated for all memory operations:
+    - POST /v1/memory -> action='write'
+    - GET /v1/memory/{key} -> action='read', authorized=1
+    - GET /v1/agents/{target}/memory/{key} (authorized) -> action='cross_agent_read', authorized=1
+    - GET /v1/agents/{target}/memory/{key} (denied) -> action='cross_agent_read', authorized=0
+    - PATCH /v1/memory/{key}/visibility -> action='visibility_changed' with old/new visibility
+    """
+
+    def _db(self):
+        """Return a raw sqlite3 connection to inspect audit log."""
+        import sqlite3
+        from main import DB_PATH
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _audit_rows(self, agent_id=None, action=None, key=None):
+        """Fetch audit log rows, optionally filtered."""
+        conn = self._db()
+        query = "SELECT * FROM memory_access_log WHERE 1=1"
+        params = []
+        if agent_id:
+            query += " AND agent_id=?"
+            params.append(agent_id)
+        if action:
+            query += " AND action=?"
+            params.append(action)
+        if key:
+            query += " AND key=?"
+            params.append(key)
+        rows = conn.execute(query, params).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def test_write_creates_audit_log_entry(self):
+        """POST /v1/memory generates a memory_access_log row with action='write'."""
+        aid, _, h = register_agent("audit-write")
+        client.post("/v1/memory", json={"key": "wkey", "value": "wval", "visibility": "private"}, headers=h)
+        rows = self._audit_rows(agent_id=aid, action="write", key="wkey")
+        assert len(rows) >= 1, "Expected at least one audit row with action='write'"
+        row = rows[0]
+        assert row["action"] == "write"
+        assert row["agent_id"] == aid
+        assert row["actor_agent_id"] == aid
+
+    def test_own_read_creates_audit_log_entry(self):
+        """GET /v1/memory/{key} generates a memory_access_log row with action='read', authorized=1."""
+        aid, _, h = register_agent("audit-read")
+        client.post("/v1/memory", json={"key": "rkey", "value": "rval"}, headers=h)
+        client.get("/v1/memory/rkey", headers=h)
+        rows = self._audit_rows(agent_id=aid, action="read", key="rkey")
+        assert len(rows) >= 1, "Expected at least one audit row with action='read'"
+        row = rows[0]
+        assert row["action"] == "read"
+        assert row["agent_id"] == aid
+        assert row["actor_agent_id"] == aid
+        assert row["authorized"] == 1
+
+    def test_authorized_cross_agent_read_logged_as_authorized(self):
+        """Authorized GET /v1/agents/{target}/memory/{key} logs action='cross_agent_read', authorized=1."""
+        aid1, _, h1 = register_agent("audit-cross-owner")
+        aid2, _, h2 = register_agent("audit-cross-requester")
+        client.post("/v1/memory", json={"key": "pubkey", "value": "pv", "visibility": "public"}, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/pubkey", headers=h2)
+        assert r.status_code == 200
+        rows = self._audit_rows(agent_id=aid1, action="cross_agent_read", key="pubkey")
+        assert len(rows) >= 1, "Expected cross_agent_read audit row for authorized access"
+        row = rows[0]
+        assert row["authorized"] == 1
+        assert row["actor_agent_id"] == aid2
+
+    def test_unauthorized_cross_agent_read_logged_as_unauthorized(self):
+        """Denied GET /v1/agents/{target}/memory/{key} logs action='cross_agent_read', authorized=0."""
+        aid1, _, h1 = register_agent("audit-denied-owner")
+        aid2, _, h2 = register_agent("audit-denied-requester")
+        client.post("/v1/memory", json={"key": "privkey", "value": "pv", "visibility": "private"}, headers=h1)
+        r = client.get(f"/v1/agents/{aid1}/memory/privkey", headers=h2)
+        assert r.status_code == 403
+        rows = self._audit_rows(agent_id=aid1, action="cross_agent_read", key="privkey")
+        assert len(rows) >= 1, "Expected cross_agent_read audit row for denied access"
+        row = rows[0]
+        assert row["authorized"] == 0
+        assert row["actor_agent_id"] == aid2
+
+    def test_visibility_change_logged_with_old_and_new(self):
+        """PATCH /v1/memory/{key}/visibility logs action='visibility_changed' with old and new visibility."""
+        aid, _, h = register_agent("audit-vis-change")
+        client.post("/v1/memory", json={"key": "vckey", "value": "vcval", "visibility": "private"}, headers=h)
+        client.patch(
+            "/v1/memory/vckey/visibility",
+            json={"namespace": "default", "key": "vckey", "visibility": "public", "shared_agents": []},
+            headers=h,
+        )
+        rows = self._audit_rows(agent_id=aid, action="visibility_changed", key="vckey")
+        assert len(rows) >= 1, "Expected visibility_changed audit row"
+        row = rows[0]
+        assert row["old_visibility"] == "private"
+        assert row["new_visibility"] == "public"
+        assert row["actor_agent_id"] == aid
