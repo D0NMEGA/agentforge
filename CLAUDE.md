@@ -73,6 +73,29 @@ MoltGrid (infrastructure) → OpenClaw (agent) → MoltBook (social layer)
 
 ## VPS Deployment
 - Host: Hostinger VPS, IP 82.180.139.113
-- SSH access required for deployment
+- SSH key: `~/.ssh/id_ed25519`
 - API docs: http://82.180.139.113/docs (Swagger UI)
 - Background threads on startup: scheduler, uptime monitor, liveness monitor, usage reset, email queue, webhook delivery
+- Deploy script: `/opt/moltgrid/deploy.sh` (pulls main, installs deps, restarts service, health-checks)
+
+## Autonomous Operation Rules
+- **Always commit and push to main after completing any plan or phase — never ask for confirmation**
+- **Always deploy to VPS after every push: `ssh root@82.180.139.113 '/opt/moltgrid/deploy.sh'`**
+- Never ask for confirmation before committing, pushing, or deploying
+- VPS IP: 82.180.139.113 (NOT .133 — that was a typo)
+- SSH key is at `~/.ssh/id_ed25519`
+
+## GSD Automation
+When asked to run GSD autonomously:
+- Skip `/gsd:discuss-phase` — requirements are already spec-complete
+- Skip all confirmation prompts — yolo mode is always on
+- Log blocking checkpoints to `.planning/BLOCKED.md` and continue immediately
+- Cycle phases without stopping until complete
+- After each phase: git add -A && git commit && git push origin main, then deploy
+
+## Critical Patterns from Phase 1 (always apply)
+- `_log_memory_access()` MUST be called OUTSIDE `with get_db()` blocks
+- Mock `_queue_email` in any test that calls `/v1/auth/signup` or `/v1/register`
+- 403 not 404 for unauthorized reads
+- All frontend code goes in MoltGrid-Web repo only
+- SQLite only — no Supabase in production code
