@@ -3230,3 +3230,183 @@ class TestMemoryDashboardEndpoints:
         log_actions = [e["action"] for e in d["logs"]]
         assert "visibility_changed" in log_actions, \
             f"Expected visibility_changed in logs, got: {log_actions}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 2: OpenClaw Integration Tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPhase2Schema:
+    """OC-03, OC-04, OC-05 — Schema migrations: new columns and integrations table."""
+
+    def test_agents_has_moltbook_profile_id(self):
+        """agents table must have moltbook_profile_id column after migration."""
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+        conn.close()
+        assert "moltbook_profile_id" in cols, f"moltbook_profile_id missing from agents; cols={cols}"
+
+    def test_analytics_events_has_source(self):
+        """analytics_events must have source and moltbook_url columns."""
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(analytics_events)").fetchall()}
+        conn.close()
+        assert "source" in cols, f"source missing from analytics_events; cols={cols}"
+        assert "moltbook_url" in cols, f"moltbook_url missing from analytics_events; cols={cols}"
+
+    def test_integrations_table_exists(self):
+        """integrations table must exist with correct schema."""
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(integrations)").fetchall()}
+        conn.close()
+        for expected in ("id", "agent_id", "platform", "config", "status", "created_at"):
+            assert expected in cols, f"'{expected}' missing from integrations table; cols={cols}"
+
+
+class TestPhase2IntegrationEndpoints:
+    """OC-06, OC-07 — POST/GET /v1/agents/{agent_id}/integrations."""
+
+    def _register_agent(self, name="int-test-agent"):
+        r = client.post("/v1/register", json={"name": name})
+        assert r.status_code == 200, r.text
+        return r.json()["agent_id"], r.json()["api_key"]
+
+    def _auth(self, api_key):
+        return {"X-API-Key": api_key}
+
+    def test_create_integration(self):
+        """Agent can link a platform integration to itself."""
+        agent_id, api_key = self._register_agent("int-create-agent")
+        r = client.post(
+            f"/v1/agents/{agent_id}/integrations",
+            json={"platform": "moltbook", "config": {"profile_id": "mb_123"}, "status": "active"},
+            headers=self._auth(api_key),
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["platform"] == "moltbook"
+        assert d["agent_id"] == agent_id
+        assert "id" in d
+
+    def test_list_integrations(self):
+        """Agent can list its own integrations."""
+        agent_id, api_key = self._register_agent("int-list-agent")
+        client.post(
+            f"/v1/agents/{agent_id}/integrations",
+            json={"platform": "slack", "config": {"webhook": "https://hooks.slack.com/x"}, "status": "active"},
+            headers=self._auth(api_key),
+        )
+        r = client.get(f"/v1/agents/{agent_id}/integrations", headers=self._auth(api_key))
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "integrations" in d
+        assert len(d["integrations"]) == 1
+        assert d["integrations"][0]["platform"] == "slack"
+
+    def test_cannot_access_other_agent_integrations(self):
+        """Agent B cannot access Agent A's integrations — returns 403."""
+        agent_a_id, _ = self._register_agent("int-owner-a")
+        _, api_key_b = self._register_agent("int-caller-b")
+        r = client.get(f"/v1/agents/{agent_a_id}/integrations", headers=self._auth(api_key_b))
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+    def test_cannot_create_integration_for_other_agent(self):
+        """Agent B cannot create integrations for Agent A — returns 403."""
+        agent_a_id, _ = self._register_agent("int-target-a")
+        _, api_key_b = self._register_agent("int-attacker-b")
+        r = client.post(
+            f"/v1/agents/{agent_a_id}/integrations",
+            json={"platform": "evil", "status": "active"},
+            headers=self._auth(api_key_b),
+        )
+        assert r.status_code == 403, f"Expected 403, got {r.status_code}"
+
+
+class TestPhase2MoltBookEvents:
+    """OC-08, OC-09, OC-10 — MoltBook event ingestion and activity feed."""
+
+    def _register_agent(self, name="mb-test-agent"):
+        r = client.post("/v1/register", json={"name": name})
+        assert r.status_code == 200, r.text
+        return r.json()["agent_id"], r.json()["api_key"]
+
+    def test_ingest_moltbook_event(self):
+        """POST /v1/moltbook/events stores event with source='moltbook'."""
+        agent_id, api_key = self._register_agent("mb-ingest-agent")
+        r = client.post(
+            "/v1/moltbook/events",
+            json={
+                "event_type": "post",
+                "moltbook_url": "https://moltbook.com/posts/123",
+                "metadata": {"content": "Hello from OpenClaw!"},
+            },
+            headers={"X-API-Key": api_key},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["source"] == "moltbook"
+        assert d["event_name"] == "moltbook.post"
+        assert "id" in d
+
+    def test_moltbook_events_appear_in_activity_feed(self):
+        """MoltBook events with badge='moltbook' appear in user activity feed."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="mbevent@example.com", agent_name="mb-activity-agent"
+        )
+        # Ingest a MoltBook event
+        client.post(
+            "/v1/moltbook/events",
+            json={"event_type": "upvote", "moltbook_url": "https://moltbook.com/posts/456"},
+            headers={"X-API-Key": api_key},
+        )
+        # Fetch activity feed
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/activity",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        events = r.json()["events"]
+        mb_events = [e for e in events if e.get("badge") == "moltbook"]
+        assert len(mb_events) >= 1, f"Expected MoltBook event in feed, got: {events}"
+        assert mb_events[0]["moltbook_url"] == "https://moltbook.com/posts/456"
+
+    def test_moltbook_event_types(self):
+        """Various MoltBook event types (post, reply, upvote) are all accepted."""
+        agent_id, api_key = self._register_agent("mb-types-agent")
+        for event_type in ("post", "reply", "upvote"):
+            r = client.post(
+                "/v1/moltbook/events",
+                json={"event_type": event_type},
+                headers={"X-API-Key": api_key},
+            )
+            assert r.status_code == 200, f"event_type={event_type} failed: {r.text}"
+            assert r.json()["event_name"] == f"moltbook.{event_type}"
+
+
+class TestPhase2UserIntegrations:
+    """User dashboard integration listing endpoint."""
+
+    def test_user_can_list_agent_integrations(self):
+        """GET /v1/user/agents/{agent_id}/integrations returns integration list."""
+        _, token, agent_id, api_key = _register_user_and_agent(
+            email="userint@example.com", agent_name="user-int-agent"
+        )
+        # Create an integration via agent API
+        client.post(
+            f"/v1/agents/{agent_id}/integrations",
+            json={"platform": "n8n", "status": "active"},
+            headers={"X-API-Key": api_key},
+        )
+        # Fetch via dashboard endpoint
+        r = client.get(
+            f"/v1/user/agents/{agent_id}/integrations",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert "integrations" in d
+        assert len(d["integrations"]) == 1
+        assert d["integrations"][0]["platform"] == "n8n"

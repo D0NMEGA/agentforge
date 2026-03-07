@@ -476,9 +476,35 @@ def init_db():
         ("heartbeat_status", "TEXT DEFAULT 'unknown'"), ("heartbeat_meta", "TEXT"),
         ("owner_id", "TEXT"),
         ("onboarding_completed", "INTEGER DEFAULT 0"),
+        ("moltbook_profile_id", "TEXT"),
+        ("display_name", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
+
+    # Migrate analytics_events — add source and moltbook_url columns
+    ae_existing = {row[1] for row in conn.execute("PRAGMA table_info(analytics_events)").fetchall()}
+    for col, typedef in [
+        ("source", "TEXT DEFAULT 'moltgrid_api'"),
+        ("moltbook_url", "TEXT"),
+    ]:
+        if col not in ae_existing:
+            conn.execute(f"ALTER TABLE analytics_events ADD COLUMN {col} {typedef}")
+    conn.execute("UPDATE analytics_events SET source='moltgrid_api' WHERE source IS NULL")
+
+    # Create integrations table (OC-05)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS integrations (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            config TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_integrations_agent ON integrations(agent_id)")
 
     # Migrate existing users table — add columns for billing and notifications
     try:
@@ -948,6 +974,21 @@ def user_agent_activity(agent_id: str, user_id: str = Depends(get_user_id)):
         ).fetchall():
             events.append(dict(r))
 
+        # MoltBook events (OC-09, OC-10) — include source badge + deep link
+        for r in db.execute(
+            "SELECT id as event_id, event_name as event_type, metadata, source, moltbook_url, "
+            "created_at as timestamp FROM analytics_events "
+            "WHERE agent_id=? AND source='moltbook' ORDER BY created_at DESC LIMIT 50",
+            (agent_id,),
+        ).fetchall():
+            item = dict(r)
+            item["badge"] = "moltbook"
+            try:
+                item["metadata"] = json.loads(item["metadata"]) if item.get("metadata") else {}
+            except Exception:
+                item["metadata"] = {}
+            events.append(item)
+
     # Sort all events by timestamp DESC, take top 50
     events.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
     return {"agent_id": agent_id, "events": events[:50]}
@@ -1329,6 +1370,75 @@ def user_memory_delete(
     if not deleted: raise HTTPException(404, "Memory key not found")
     _log_memory_access("delete", agent_id, namespace, key, actor_user_id=user_id)
     return {"status": "deleted"}
+
+
+# ── Integrations (OC-05, OC-06, OC-07) ───────────────────────────────────────
+class IntegrationCreateRequest(BaseModel):
+    platform: str = Field(..., max_length=64, description="Platform name, e.g. 'moltbook', 'slack'")
+    config: Optional[dict] = Field(None, description="Platform-specific config JSON")
+    status: str = Field("active", max_length=32)
+
+@app.post("/v1/agents/{agent_id}/integrations", tags=["Integrations"])
+def integration_create(agent_id: str, req: IntegrationCreateRequest, caller_id: str = Depends(get_agent_id)):
+    """Link an external platform to this agent. Agent must own itself (caller == agent_id)."""
+    if caller_id != agent_id:
+        raise HTTPException(403, "You can only manage integrations for your own agent")
+    integration_id = f"int_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        agent = db.execute("SELECT agent_id FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        if not agent:
+            raise HTTPException(404, "Agent not found")
+        db.execute(
+            "INSERT INTO integrations (id, agent_id, platform, config, status, created_at) VALUES (?,?,?,?,?,?)",
+            (integration_id, agent_id, req.platform,
+             json.dumps(req.config) if req.config else None,
+             req.status, now),
+        )
+    return {"id": integration_id, "agent_id": agent_id, "platform": req.platform,
+            "status": req.status, "created_at": now}
+
+@app.get("/v1/agents/{agent_id}/integrations", tags=["Integrations"])
+def integration_list(agent_id: str, caller_id: str = Depends(get_agent_id)):
+    """List all platform integrations linked to an agent. Caller must be the agent."""
+    if caller_id != agent_id:
+        raise HTTPException(403, "You can only view integrations for your own agent")
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT id, platform, config, status, created_at FROM integrations WHERE agent_id=? ORDER BY created_at DESC",
+            (agent_id,),
+        ).fetchall()
+    integrations = []
+    for r in rows:
+        item = dict(r)
+        if item.get("config"):
+            try:
+                item["config"] = json.loads(item["config"])
+            except Exception:
+                pass
+        integrations.append(item)
+    return {"agent_id": agent_id, "integrations": integrations}
+
+# ── User-facing integrations (dashboard) ─────────────────────────────────────
+@app.get("/v1/user/agents/{agent_id}/integrations", tags=["User Dashboard"])
+def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
+    """List platform integrations for an owned agent (dashboard)."""
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        rows = db.execute(
+            "SELECT id, platform, config, status, created_at FROM integrations WHERE agent_id=? ORDER BY created_at DESC",
+            (agent_id,),
+        ).fetchall()
+    integrations = []
+    for r in rows:
+        item = dict(r)
+        if item.get("config"):
+            try:
+                item["config"] = json.loads(item["config"])
+            except Exception:
+                pass
+        integrations.append(item)
+    return {"agent_id": agent_id, "integrations": integrations}
 
 
 # ── Jobs list ─────────────────────────────────────────────────────────────────
@@ -1769,6 +1879,32 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
         api_key=api_key,
         message="Store your API key securely. It cannot be recovered."
     )
+
+
+# ── MoltBook event ingestion (OC-08) ─────────────────────────────────────────
+class MoltBookEventRequest(BaseModel):
+    event_type: str = Field(..., max_length=64, description="e.g. 'post', 'reply', 'upvote'")
+    moltbook_url: Optional[str] = Field(None, max_length=512, description="Deep link to the MoltBook post")
+    metadata: Optional[dict] = Field(None, description="Additional event metadata")
+
+@app.post("/v1/moltbook/events", tags=["Integrations"])
+def moltbook_ingest_event(req: MoltBookEventRequest, agent_id: str = Depends(get_agent_id)):
+    """Ingest a MoltBook social action (post, reply, upvote) as an analytics_event with source='moltbook'."""
+    event_id = f"evt_{uuid.uuid4().hex[:16]}"
+    now = datetime.now(timezone.utc).isoformat()
+    meta = req.metadata or {}
+    meta["event_type"] = req.event_type
+    if req.moltbook_url:
+        meta["moltbook_url"] = req.moltbook_url
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO analytics_events (id, event_name, agent_id, metadata, source, moltbook_url, created_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (event_id, f"moltbook.{req.event_type}", agent_id,
+             json.dumps(meta), "moltbook", req.moltbook_url, now),
+        )
+    return {"id": event_id, "event_name": f"moltbook.{req.event_type}", "source": "moltbook",
+            "agent_id": agent_id, "created_at": now}
 
 
 @app.post("/v1/agents/rotate-key", tags=["Auth"])

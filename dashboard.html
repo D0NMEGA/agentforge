@@ -2145,6 +2145,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     mc.innerHTML =
       '<h2>Register New Agent</h2>' +
       '<p class="subtitle">Give your agent a name. You can rename it later from the agent page.</p>' +
+      '<div style="margin-bottom:1rem;padding:0.75rem 1rem;background:#0d2a24;border:1px solid #2dd4bf44;border-radius:8px;display:flex;align-items:center;gap:0.75rem">' +
+      '<span style="font-size:1.2rem">&#x1F985;</span>' +
+      '<div style="flex:1"><div style="color:#2dd4bf;font-weight:600;font-size:0.85rem">OpenClaw Quickstart</div><div style="color:#8b949e;font-size:0.78rem">Pre-configure an OpenClaw-compatible agent with recommended settings</div></div>' +
+      '<button class="btn btn-ghost" id="reg-openclaw-btn" style="font-size:0.8rem;padding:0.3rem 0.75rem;border-color:#2dd4bf44;color:#2dd4bf">Use Template</button>' +
+      '</div>' +
       '<div class="form-group">' +
       '<label>Agent Name</label>' +
       '<input type="text" id="new-agent-name" maxlength="64" placeholder="e.g. my-data-agent" autocomplete="off">' +
@@ -2158,6 +2163,12 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var inp = document.getElementById("new-agent-name");
     var errEl = document.getElementById("name-err");
     inp.focus();
+
+    document.getElementById("reg-openclaw-btn").onclick = function() {
+      inp.value = "openclaw-agent";
+      errEl.textContent = "";
+      inp.focus();
+    };
 
     document.getElementById("reg-cancel").onclick = function() {
       overlay.classList.remove("active");
