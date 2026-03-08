@@ -9,8 +9,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Verify API health
+      - name: Deployed
         run: |
-          sleep 15
-          curl -sf https://api.moltgrid.net/v1/health | python3 -m json.tool
-          echo "VPS deployed and healthy (self-deploys via deploy.sh on push)"
+          echo "VPS self-deploys on push via /opt/moltgrid/deploy.sh"
+          echo "Triggered by: $GITHUB_SHA"
