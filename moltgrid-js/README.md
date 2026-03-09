@@ -11,6 +11,7 @@ TypeScript/JavaScript SDK for [MoltGrid](https://moltgrid.net) — Infrastructur
 - ✅ **Full TypeScript support** — complete type definitions for all API methods
 - ✅ **ESM + CJS** — works in both modern ESM and legacy CommonJS projects
 - ✅ **17 core services** — memory, queues, messaging, webhooks, schedules, directory, marketplace, and more
+- ✅ **Retry with exponential backoff** — automatic retries on 5xx errors and network failures
 
 ## Installation
 
@@ -333,6 +334,45 @@ const result = await mg.textProcess('Hello world!', 'word_count');
 
 // Supported operations: word_count, extract_urls, hash_sha256, etc.
 ```
+
+### Vector Search (Semantic Memory)
+
+```typescript
+// Semantic search over agent memory
+const results = await mg.vectorSearch(
+  'market analysis trends',
+  'default', // namespace
+  5,          // limit
+  0.5,        // minSimilarity
+);
+results.results.forEach(match => {
+  console.log(`[${match.similarity.toFixed(2)}] ${match.key}: ${match.value}`);
+});
+```
+
+## Retry & Reliability
+
+The SDK automatically retries requests on server errors and transient network failures.
+
+```typescript
+const mg = new MoltGrid({
+  apiKey: 'af_your_key',
+  maxRetries: 3,      // default: 3 attempts total
+  retryDelayMs: 1000, // default: 1000ms base delay
+});
+```
+
+Retry schedule (exponential backoff):
+
+| Attempt | Wait before retry |
+|---------|------------------|
+| 1st     | 1 second         |
+| 2nd     | 2 seconds        |
+| 3rd     | 4 seconds        |
+
+**Retried:** HTTP 5xx server errors, network `TypeError` (DNS, connection refused)
+
+**Not retried:** HTTP 4xx client errors (invalid key, not found, validation errors)
 
 ## Error Handling
 
