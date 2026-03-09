@@ -38,6 +38,7 @@ import jwt as pyjwt
 import bcrypt as _bcrypt
 import stripe
 import pyotp
+import urllib.parse
 import qrcode
 import qrcode.image.svg
 import base64
@@ -920,6 +921,7 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(..., max_length=256)
     password: str = Field(..., max_length=128)
+    totp_code: Optional[str] = Field(None, max_length=16)
 
 @app.post("/v1/auth/signup", tags=["Auth"])
 def auth_signup(req: SignupRequest):
@@ -971,6 +973,29 @@ def auth_login(req: LoginRequest, request: Request):
             raise HTTPException(401, "Invalid email or password")
         now = datetime.now(timezone.utc).isoformat()
         db.execute("UPDATE users SET last_login = ? WHERE user_id = ?", (now, row["user_id"]))
+    # Check TOTP status
+    with get_db() as totp_db:
+        totp_row = totp_db.execute(
+            "SELECT totp_enabled, totp_secret, totp_recovery_codes FROM users WHERE user_id = ?",
+            (row["user_id"],)
+        ).fetchone()
+    if totp_row and totp_row["totp_enabled"]:
+        if not req.totp_code:
+            temp_token = _create_token(row["user_id"], req.email.lower())
+            return {"requires_2fa": True, "temp_token": temp_token}
+        totp_valid = pyotp.TOTP(totp_row["totp_secret"]).verify(req.totp_code)
+        if not totp_valid:
+            code_hash = hashlib.sha256(req.totp_code.encode()).hexdigest()
+            recovery_codes = json.loads(totp_row["totp_recovery_codes"] or "[]")
+            if code_hash in recovery_codes:
+                recovery_codes.remove(code_hash)
+                with get_db() as rc_db:
+                    rc_db.execute(
+                        "UPDATE users SET totp_recovery_codes = ? WHERE user_id = ?",
+                        (json.dumps(recovery_codes), row["user_id"])
+                    )
+            else:
+                raise HTTPException(401, "Invalid TOTP code")
     token = _create_token(row["user_id"], req.email.lower())
     _track_event("user.login", user_id=row["user_id"])
     # IP-based security alert (OUTSIDE with get_db() blocks)
@@ -1027,6 +1052,71 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
             raise HTTPException(404, "User not found")
     token = _create_token(user_id, row["email"])
     return {"user_id": user_id, "token": token}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOTP 2FA
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TOTP2FAVerifyRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8)
+
+class TOTP2FADisableRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=16)  # TOTP or recovery code
+
+@app.post("/v1/auth/2fa/setup", tags=["Auth"])
+def auth_2fa_setup(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT email, totp_enabled FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "User not found")
+        if row["totp_enabled"]:
+            raise HTTPException(400, detail={"error": "2FA already enabled", "code": "2FA_ALREADY_ENABLED", "status": 400})
+        secret = pyotp.random_base32()
+        uri = pyotp.totp.TOTP(secret).provisioning_uri(name=row["email"], issuer_name="MoltGrid")
+        db.execute("UPDATE users SET totp_secret = ? WHERE user_id = ?", (secret, user_id))
+    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(uri)}"
+    return {"secret": secret, "otpauth_uri": uri, "qr_code_url": qr_code_url}
+
+@app.post("/v1/auth/2fa/verify", tags=["Auth"])
+def auth_2fa_verify(req: TOTP2FAVerifyRequest, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT totp_secret FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if not row or not row["totp_secret"]:
+            raise HTTPException(400, detail={"error": "2FA setup not initiated", "code": "2FA_NOT_SETUP", "status": 400})
+        if not pyotp.TOTP(row["totp_secret"]).verify(req.code):
+            raise HTTPException(401, detail={"error": "Invalid TOTP code", "code": "INVALID_TOTP", "status": 401})
+        plain_codes = [secrets.token_hex(8) for _ in range(10)]
+        hashed_codes = [hashlib.sha256(c.encode()).hexdigest() for c in plain_codes]
+        db.execute(
+            "UPDATE users SET totp_enabled = 1, totp_recovery_codes = ? WHERE user_id = ?",
+            (json.dumps(hashed_codes), user_id)
+        )
+    return {"enabled": True, "recovery_codes": plain_codes}
+
+@app.post("/v1/auth/2fa/disable", tags=["Auth"])
+def auth_2fa_disable(req: TOTP2FADisableRequest, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        row = db.execute(
+            "SELECT totp_secret, totp_enabled, totp_recovery_codes FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        if not row or not row["totp_enabled"]:
+            raise HTTPException(400, detail={"error": "2FA not enabled", "code": "2FA_NOT_ENABLED", "status": 400})
+        totp_valid = pyotp.TOTP(row["totp_secret"]).verify(req.code)
+        if not totp_valid:
+            code_hash = hashlib.sha256(req.code.encode()).hexdigest()
+            recovery_codes = json.loads(row["totp_recovery_codes"] or "[]")
+            if code_hash not in recovery_codes:
+                raise HTTPException(401, detail={"error": "Invalid code", "code": "INVALID_CODE", "status": 401})
+        db.execute(
+            "UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL WHERE user_id = ?",
+            (user_id,)
+        )
+    return {"disabled": True}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
