@@ -5680,6 +5680,173 @@ def submit_contact(form: ContactForm):
     return {"status": "sent", "id": submission_id}
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# MULTI-USER ORG ACCOUNTS (BL-02)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class OrgCreateRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=64)
+
+class OrgInviteRequest(BaseModel):
+    user_id: str = Field(..., max_length=64)
+    role: str = Field("member", pattern="^(owner|admin|member)$")
+
+class OrgRoleUpdateRequest(BaseModel):
+    role: str = Field(..., pattern="^(owner|admin|member)$")
+
+
+@app.post("/v1/orgs", tags=["Orgs"])
+def create_org(req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
+    org_id = f"org_{uuid.uuid4().hex[:12]}"
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO organizations (org_id, name, owner_user_id, created_at) VALUES (?, ?, ?, ?)",
+            (org_id, req.name, user_id, now),
+        )
+        db.execute(
+            "INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+            (org_id, user_id, "owner", now),
+        )
+    return {"org_id": org_id, "name": req.name, "owner_user_id": user_id, "created_at": now}
+
+
+@app.get("/v1/orgs", tags=["Orgs"])
+def list_orgs(user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        rows = db.execute(
+            """SELECT o.org_id, o.name, o.owner_user_id, o.created_at
+               FROM organizations o
+               JOIN org_members m ON m.org_id = o.org_id
+               WHERE m.user_id = ?""",
+            (user_id,),
+        ).fetchall()
+    return {"orgs": [dict(r) for r in rows]}
+
+
+@app.get("/v1/orgs/{org_id}", tags=["Orgs"])
+def get_org(org_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        org = db.execute(
+            "SELECT org_id, name, owner_user_id, created_at FROM organizations WHERE org_id = ?",
+            (org_id,),
+        ).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        member = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not member:
+            raise HTTPException(403, "Not a member of this org")
+        members = db.execute(
+            "SELECT user_id, role, joined_at FROM org_members WHERE org_id = ?",
+            (org_id,),
+        ).fetchall()
+    return {
+        **dict(org),
+        "members": [dict(m) for m in members],
+    }
+
+
+@app.post("/v1/orgs/{org_id}/members", tags=["Orgs"])
+def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get_user_id)):
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        caller = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not caller or caller["role"] not in ("owner", "admin"):
+            raise HTTPException(403, "Only owners and admins can invite members")
+        existing = db.execute(
+            "SELECT user_id FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, req.user_id),
+        ).fetchone()
+        if existing:
+            raise HTTPException(409, detail={"error": "Already a member", "code": "ALREADY_MEMBER", "status": 409})
+        db.execute(
+            "INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+            (org_id, req.user_id, req.role, now),
+        )
+    return {"org_id": org_id, "user_id": req.user_id, "role": req.role, "joined_at": now}
+
+
+@app.get("/v1/orgs/{org_id}/members", tags=["Orgs"])
+def list_org_members(org_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        member = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not member:
+            raise HTTPException(403, "Not a member of this org")
+        members = db.execute(
+            "SELECT user_id, role, joined_at FROM org_members WHERE org_id = ?",
+            (org_id,),
+        ).fetchall()
+    return {"org_id": org_id, "members": [dict(m) for m in members]}
+
+
+@app.delete("/v1/orgs/{org_id}/members/{target_user_id}", tags=["Orgs"])
+def remove_member(org_id: str, target_user_id: str, user_id: str = Depends(get_user_id)):
+    with get_db() as db:
+        org = db.execute(
+            "SELECT owner_user_id FROM organizations WHERE org_id = ?",
+            (org_id,),
+        ).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        caller = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not caller or caller["role"] not in ("owner", "admin"):
+            raise HTTPException(403, "Only owners and admins can remove members")
+        if org["owner_user_id"] == target_user_id:
+            raise HTTPException(400, "Cannot remove the org owner")
+        db.execute(
+            "DELETE FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, target_user_id),
+        )
+    return {"removed": True}
+
+
+@app.patch("/v1/orgs/{org_id}/members/{target_user_id}/role", tags=["Orgs"])
+def change_member_role(
+    org_id: str,
+    target_user_id: str,
+    req: OrgRoleUpdateRequest,
+    user_id: str = Depends(get_user_id),
+):
+    with get_db() as db:
+        org = db.execute(
+            "SELECT owner_user_id FROM organizations WHERE org_id = ?",
+            (org_id,),
+        ).fetchone()
+        if not org:
+            raise HTTPException(404, "Org not found")
+        caller = db.execute(
+            "SELECT role FROM org_members WHERE org_id = ? AND user_id = ?",
+            (org_id, user_id),
+        ).fetchone()
+        if not caller or caller["role"] != "owner":
+            raise HTTPException(403, "Only the owner can change member roles")
+        if org["owner_user_id"] == target_user_id and req.role != "owner":
+            raise HTTPException(400, "Cannot demote the org owner away from owner role")
+        db.execute(
+            "UPDATE org_members SET role = ? WHERE org_id = ? AND user_id = ?",
+            (req.role, org_id, target_user_id),
+        )
+    return {"org_id": org_id, "user_id": target_user_id, "role": req.role}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ROOT
 # ═══════════════════════════════════════════════════════════════════════════════
 
