@@ -37,6 +37,11 @@ from pydantic import BaseModel, ConfigDict, Field
 import jwt as pyjwt
 import bcrypt as _bcrypt
 import stripe
+import pyotp
+import qrcode
+import qrcode.image.svg
+import base64
+import io
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -566,6 +571,9 @@ def init_db():
             ("payment_failed", "INTEGER DEFAULT 0"),
             ("notification_preferences", "TEXT"),
             ("known_login_ips", "TEXT DEFAULT '[]'"),
+            ("totp_secret", "TEXT"),
+            ("totp_enabled", "INTEGER DEFAULT 0"),
+            ("totp_recovery_codes", "TEXT"),
         ]:
             if col not in u_existing:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
@@ -610,6 +618,82 @@ def init_db():
     )
     conn.execute(
         'CREATE INDEX IF NOT EXISTS idx_mal_agent ON memory_access_log(agent_id, created_at)'
+    )
+
+    # Agent templates table (BL-04)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS templates (
+            template_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT,
+            starter_code TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # Seed 4 built-in templates — INSERT OR IGNORE so re-seeding is always safe
+    _templates_seed = [
+        (
+            "tmpl_openclaw_social",
+            "OpenClaw Social Agent",
+            "An agent that posts to MoltBook and tracks social engagement via MoltGrid analytics.",
+            "social",
+            '{"memory_keys": ["moltbook_profile_id", "last_post_id", "follower_count"], "capabilities": ["moltbook_post", "moltbook_reply", "moltbook_upvote"], "starter_tasks": [{"action": "heartbeat", "interval": 60}, {"action": "poll_moltbook_events", "queue": "social"}], "example_post": "POST /v1/moltbook/events"}',
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "tmpl_worker",
+            "Background Worker Agent",
+            "A general-purpose background worker that polls the job queue and processes tasks reliably.",
+            "worker",
+            '{"memory_keys": ["jobs_processed", "last_job_id", "worker_status"], "capabilities": ["queue_poll", "queue_complete", "queue_fail"], "starter_tasks": [{"action": "heartbeat", "interval": 30}, {"action": "poll_queue", "queue": "default", "interval": 5}], "example_poll": "GET /v1/queue/claim?queue=default"}',
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "tmpl_research",
+            "Research Agent",
+            "A research agent that stores findings in memory and uses vector search to avoid duplicate work.",
+            "research",
+            '{"memory_keys": ["research_topic", "findings_count", "last_query"], "capabilities": ["memory_write", "memory_vector_search", "shared_memory_read"], "starter_tasks": [{"action": "heartbeat", "interval": 120}, {"action": "vector_index_findings", "namespace": "research"}], "example_search": "POST /v1/vector/search"}',
+            "2026-01-01T00:00:00Z",
+        ),
+        (
+            "tmpl_customer_service",
+            "Customer Service Agent",
+            "A customer service agent that handles inbound relay messages and routes them to the right queue.",
+            "customer_service",
+            '{"memory_keys": ["tickets_open", "tickets_resolved", "avg_response_time_s"], "capabilities": ["relay_inbox", "relay_send", "queue_submit"], "starter_tasks": [{"action": "heartbeat", "interval": 30}, {"action": "poll_inbox", "interval": 10}], "example_reply": "POST /v1/relay/send"}',
+            "2026-01-01T00:00:00Z",
+        ),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO templates (template_id, name, description, category, starter_code, created_at) VALUES (?,?,?,?,?,?)",
+        _templates_seed,
+    )
+
+    # Multi-user org accounts (BL-02)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS organizations (
+            org_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            owner_user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS org_members (
+            org_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'member',
+            joined_at TEXT NOT NULL,
+            PRIMARY KEY (org_id, user_id)
+        )
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)"
     )
 
     conn.commit()
@@ -1931,11 +2015,56 @@ def billing_status(user_id: str = Depends(get_user_id)):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# AGENT TEMPLATES (BL-04)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/v1/templates", tags=["Templates"])
+def list_templates():
+    """List all available agent templates. Public — no auth required."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT template_id, name, description, category, starter_code FROM templates ORDER BY name"
+        ).fetchall()
+    return {
+        "templates": [
+            {
+                "template_id": r["template_id"],
+                "name": r["name"],
+                "description": r["description"],
+                "category": r["category"],
+                "starter_code": r["starter_code"],
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/v1/templates/{template_id}", tags=["Templates"])
+def get_template(template_id: str):
+    """Get a single agent template by ID. Public — no auth required."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT template_id, name, description, category, starter_code FROM templates WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail={"error": "Template not found", "code": "TEMPLATE_NOT_FOUND", "status": 404})
+    return {
+        "template_id": row["template_id"],
+        "name": row["name"],
+        "description": row["description"],
+        "category": row["category"],
+        "starter_code": row["starter_code"],
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # REGISTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class RegisterRequest(BaseModel):
     name: Optional[str] = Field(None, max_length=64, description="Display name for your agent")
+    template_id: Optional[str] = Field(None, max_length=64, description="Optional template ID to pre-load starter code into agent memory")
 
 class RegisterResponse(BaseModel):
     agent_id: str
@@ -2014,6 +2143,17 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
                     </html>
                     """
                     _queue_email(user["email"], "Your first agent is live on MoltGrid", first_agent_html)
+
+        # Apply template starter code to memory if template_id provided (BL-04)
+        if req.template_id:
+            tmpl = db.execute(
+                "SELECT starter_code FROM templates WHERE template_id = ?", (req.template_id,)
+            ).fetchone()
+            if tmpl and tmpl["starter_code"]:
+                db.execute(
+                    "INSERT OR REPLACE INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?,?,?,?,?,?)",
+                    (agent_id, "default", "template_starter_code", tmpl["starter_code"], now, now),
+                )
 
         # Send welcome message from MyFirstAgent
         welcome_exists = db.execute(
