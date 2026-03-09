@@ -30,6 +30,10 @@
 export interface MoltGridOptions {
   apiKey: string;
   baseUrl?: string;
+  /** Maximum number of retry attempts on 5xx or network errors. Default: 3 */
+  maxRetries?: number;
+  /** Base delay in milliseconds for exponential backoff. Default: 1000 */
+  retryDelayMs?: number;
 }
 
 export interface RegisterOptions {
@@ -275,6 +279,18 @@ export interface Scenario {
   completedAt?: string;
 }
 
+export interface VectorMatch {
+  key: string;
+  value: string;
+  namespace: string;
+  similarity: number;
+  createdAt: string;
+}
+
+export interface VectorSearchResponse {
+  results: VectorMatch[];
+}
+
 export interface HealthResponse {
   status: string;
   version: string;
@@ -330,10 +346,14 @@ export class MoltGrid {
   private static readonly DEFAULT_BASE = 'https://api.moltgrid.net';
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly maxRetries: number;
+  private readonly retryDelayMs: number;
 
   constructor(options: MoltGridOptions) {
     this.baseUrl = (options.baseUrl || MoltGrid.DEFAULT_BASE).replace(/\/$/, '');
     this.apiKey = options.apiKey;
+    this.maxRetries = options.maxRetries ?? 3;
+    this.retryDelayMs = options.retryDelayMs ?? 1000;
   }
 
   // ── Internal helpers ───────────────────────────────────────────────────────
@@ -375,20 +395,71 @@ export class MoltGrid {
       init.body = JSON.stringify(options.json);
     }
 
-    const response = await fetch(url.toString(), init);
+    let lastError: unknown;
 
-    if (!response.ok) {
-      let detail = response.statusText;
-      try {
-        const errorData = await response.json();
-        detail = errorData.detail || errorData.message || detail;
-      } catch {
-        // Ignore JSON parse errors
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      if (attempt > 0) {
+        // Exponential backoff: 1x, 2x, 4x the base delay
+        const delay = this.retryDelayMs * Math.pow(2, attempt - 1);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-      throw new MoltGridError(response.status, detail);
+
+      try {
+        const response = await fetch(url.toString(), init);
+
+        // Do not retry on 4xx client errors
+        if (response.status >= 400 && response.status < 500) {
+          let detail = response.statusText;
+          try {
+            const errorData = await response.json() as Record<string, any>;
+            detail = errorData.detail || errorData.message || detail;
+          } catch {
+            // Ignore JSON parse errors
+          }
+          throw new MoltGridError(response.status, detail);
+        }
+
+        // Retry on 5xx server errors
+        if (response.status >= 500) {
+          let detail = response.statusText;
+          try {
+            const errorData = await response.json() as Record<string, any>;
+            detail = errorData.detail || errorData.message || detail;
+          } catch {
+            // Ignore JSON parse errors
+          }
+          lastError = new MoltGridError(response.status, detail);
+          continue;
+        }
+
+        if (!response.ok) {
+          let detail = response.statusText;
+          try {
+            const errorData = await response.json() as Record<string, any>;
+            detail = errorData.detail || errorData.message || detail;
+          } catch {
+            // Ignore JSON parse errors
+          }
+          throw new MoltGridError(response.status, detail);
+        }
+
+        if (response.status === 204 || response.headers.get('content-length') === '0') {
+          return undefined as unknown as T;
+        }
+
+        return response.json() as Promise<T>;
+      } catch (err) {
+        // TypeError covers network errors (e.g., DNS failure, connection refused)
+        if (err instanceof TypeError) {
+          lastError = err;
+          continue;
+        }
+        // Re-throw MoltGridError on 4xx immediately (set above)
+        throw err;
+      }
     }
 
-    return response.json();
+    throw lastError;
   }
 
   private get<T = any>(path: string, params?: Record<string, any>): Promise<T> {
@@ -429,7 +500,7 @@ export class MoltGrid {
     if (!response.ok) {
       let detail = response.statusText;
       try {
-        const errorData = await response.json();
+        const errorData = await response.json() as Record<string, any>;
         detail = errorData.detail || errorData.message || detail;
       } catch {
         // Ignore
@@ -437,7 +508,7 @@ export class MoltGrid {
       throw new MoltGridError(response.status, detail);
     }
 
-    const data = await response.json();
+    const data = await response.json() as Record<string, any>;
     return {
       agentId: data.agent_id,
       apiKey: data.api_key,
@@ -1158,6 +1229,52 @@ export class MoltGrid {
       startedAt: data.started_at,
       completedAt: data.completed_at,
     };
+  }
+
+  // ── Vector Search ──────────────────────────────────────────────────────────
+
+  /**
+   * Perform a semantic vector search over agent memory.
+   */
+  async vectorSearch(
+    query: string,
+    namespace?: string,
+    limit?: number,
+    minSimilarity?: number,
+  ): Promise<VectorSearchResponse> {
+    const data = await this.post('/v1/vector/search', {
+      json: {
+        query,
+        namespace: namespace || 'default',
+        limit: limit ?? 5,
+        min_similarity: minSimilarity ?? 0.0,
+      },
+    });
+    return {
+      results: (data.results || []).map((r: any) => ({
+        key: r.key,
+        value: r.value,
+        namespace: r.namespace,
+        similarity: r.similarity,
+        createdAt: r.created_at,
+      })),
+    };
+  }
+
+  // ── Schedule convenience aliases ───────────────────────────────────────────
+
+  /**
+   * Pause a scheduled task (convenience alias for scheduleToggle with enabled=false).
+   */
+  async schedulePause(taskId: string): Promise<Schedule> {
+    return this.scheduleToggle(taskId, false);
+  }
+
+  /**
+   * Resume a paused scheduled task (convenience alias for scheduleToggle with enabled=true).
+   */
+  async scheduleResume(taskId: string): Promise<Schedule> {
+    return this.scheduleToggle(taskId, true);
   }
 
   // ── Text Utilities ─────────────────────────────────────────────────────────
