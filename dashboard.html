@@ -37,7 +37,7 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .btn-accent:hover { background:var(--accent-dim); }
 .btn-accent:disabled { opacity:0.4; cursor:not-allowed; }
 
-.page { position:relative; z-index:10; padding:5rem 2rem 3rem; max-width:1100px; margin:0 auto; }
+.page { position:relative; z-index:10; padding:2.5rem 2rem 3rem; max-width:1100px; margin:0 auto; }
 
 /* Auth pages */
 .auth-container { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:2rem; }
@@ -241,11 +241,9 @@ header { position:fixed; top:0; width:100%; padding:0.75rem 2rem; background:rgb
 .loading-page { display:flex; align-items:center; justify-content:center; min-height:60vh; font-family:'JetBrains Mono',monospace; color:var(--text-dim); }
 
 @media(max-width:600px) {
-  header { padding:0.75rem 1rem; }
-  .page { padding:4.5rem 1rem 2rem; }
+  .page { padding:2.5rem 1rem 2rem; }
   .agent-grid { grid-template-columns:1fr; }
   .auth-card { padding:1.5rem; }
-  .user-email { display:none; }
 }
 /* ── Tabs ── */
 .tab-bar { display:flex; gap:0; border-bottom:1px solid var(--border); margin:1.25rem 0 0; overflow-x:auto; scrollbar-width:none; }
@@ -307,6 +305,44 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 .agents-table tr:hover td { background:rgba(255,255,255,0.02); }
 .agents-table td:last-child { text-align:right; }
 .heartbeat-time { font-size:0.7rem; color:var(--text-dim); margin-top:1px; }
+
+/* ── Sidebar layout ── */
+.dashboard-shell { display:flex; min-height:100vh; }
+.sidebar { position:fixed; top:0; left:0; width:210px; height:100vh; background:var(--bg); border-right:1px solid var(--border); display:flex; flex-direction:column; z-index:110; transition:transform 0.25s; }
+.sidebar-logo { padding:1.1rem 1.25rem 0.9rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:0.5rem; cursor:pointer; }
+.sidebar-logo img { height:26px; }
+.sidebar-nav { flex:1; overflow-y:auto; padding:0.75rem 0; }
+.sidebar-item { display:flex; align-items:center; gap:0.65rem; padding:0.55rem 1.25rem; font-family:'JetBrains Mono',monospace; font-size:0.78rem; color:var(--text-dim); cursor:pointer; border-left:3px solid transparent; transition:all 0.15s; text-decoration:none; }
+.sidebar-item:hover { color:var(--text); background:var(--surface); }
+.sidebar-item.active { color:#2dd4bf; border-left-color:#2dd4bf; background:rgba(45,212,191,0.07); }
+.sidebar-item .si-icon { font-size:0.95rem; flex-shrink:0; width:18px; text-align:center; }
+.sidebar-divider { height:1px; background:var(--border); margin:0.5rem 1.25rem; }
+.sidebar-footer { padding:0.85rem 1.25rem; border-top:1px solid var(--border); }
+.sidebar-footer .sf-email { font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-bottom:4px; }
+.sidebar-footer .sf-tier { font-family:'JetBrains Mono',monospace; font-size:0.6rem; display:inline-block; padding:2px 8px; border-radius:10px; text-transform:uppercase; letter-spacing:1px; }
+.sidebar-footer .sf-logout { font-family:'JetBrains Mono',monospace; font-size:0.68rem; color:var(--text-dim); cursor:pointer; margin-top:0.5rem; display:inline-block; border:none; background:none; padding:0; transition:color 0.15s; }
+.sidebar-footer .sf-logout:hover { color:var(--accent); }
+.main-content { margin-left:210px; flex:1; min-width:0; }
+
+/* Hamburger for mobile */
+.sidebar-toggle { display:none; position:fixed; top:0.85rem; left:1rem; z-index:120; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:1.1rem; width:36px; height:36px; cursor:pointer; align-items:center; justify-content:center; }
+.sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:109; }
+
+@media(max-width:700px) {
+  .sidebar { transform:translateX(-100%); }
+  .sidebar.open { transform:translateX(0); }
+  .sidebar-toggle { display:flex; }
+  .sidebar-overlay.active { display:block; }
+  .main-content { margin-left:0; }
+  header { padding-left:3.5rem; }
+}
+
+/* ── Breadcrumbs ── */
+.breadcrumb { font-family:'JetBrains Mono',monospace; font-size:0.7rem; color:var(--text-dim); margin-bottom:1.1rem; display:flex; align-items:center; gap:0.35rem; flex-wrap:wrap; }
+.breadcrumb .bc-link { color:#2dd4bf; cursor:pointer; text-decoration:none; transition:opacity 0.15s; }
+.breadcrumb .bc-link:hover { opacity:0.75; }
+.breadcrumb .bc-sep { color:var(--border); }
+.breadcrumb .bc-current { color:var(--text-dim); }
 </style>
 </head>
 <body>
@@ -357,12 +393,21 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     if (hash === "#/billing") return renderBilling(app);
     if (hash === "#/billing/success") return renderBillingSuccess(app);
     if (hash === "#/billing/cancel") return renderBillingCancel(app);
+    if (hash === "#/billing/failed") return renderBillingFailed(app);
 
     // Agent detail: #/agents/agent_xxxx
     var m = hash.match(/^#\/agents\/(agent_[a-f0-9]+)$/);
     if (m) return renderAgentDetail(app, m[1]);
 
-    navigate("#/agents");
+    // 404 — unknown route
+    app.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:2rem">' +
+      '<div style="text-align:center;max-width:400px">' +
+      '<div style="font-size:4rem;margin-bottom:1rem;opacity:0.3">404</div>' +
+      '<h2 style="font-size:1.3rem;margin-bottom:0.5rem">Page Not Found</h2>' +
+      '<p style="color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.8rem;margin-bottom:1.5rem">The page you are looking for does not exist.</p>' +
+      '<button class="btn btn-accent" onclick="navigate(\'#/agents\')">Go Home</button>' +
+      '</div></div>';
   }
 
   window.addEventListener("hashchange", route);
@@ -518,15 +563,20 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var tier = user.subscription_tier || "free";
 
     app.innerHTML =
-      renderHeader(tier) +
+      '<div class="dashboard-shell">' +
+      renderSidebar("agents") +
+      '<div class="main-content">' +
       '<div class="page">' +
+      renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Agents"}]) +
       '<div class="dash-header"><div><h1>Your Agents</h1></div>' +
       '<div id="register-area"></div></div>' +
       '<div id="agents-content"><div class="loading-page"><span class="spinner"></span> Loading agents\u2026</div></div>' +
       '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
 
-    wireHeader();
+    wireSidebar();
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -600,18 +650,21 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
     var usagePctPre = maxCalls > 0 ? Math.round((user.usage_count / maxCalls) * 100) : 0;
 
-    // Shell with header + modal
+    // Shell with sidebar + modal
     app.innerHTML =
-      renderHeader(tier) +
+      '<div class="dashboard-shell">' +
+      renderSidebar("agents") +
+      '<div class="main-content">' +
       '<div class="page">' +
-      '<div class="back-link" id="back-link">\u2190 Back to agents</div>' +
+      renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Agents",hash:"#/agents"},{label:"Loading\u2026"}]).replace('class="bc-current">Loading\u2026<', 'class="bc-current" id="agent-bc-name">Loading\u2026<') +
       (usagePctPre >= 80 ? '<div class="upgrade-banner">\u26A0 Approaching API limit \u2014 ' + usagePctPre + '% used this month <a id="banner-upgrade">Upgrade \u2192</a></div>' : '') +
       '<div id="detail-content"><div class="loading-page"><span class="spinner"></span> Loading agent\u2026</div></div>' +
       '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
 
-    wireHeader();
-    document.getElementById("back-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
+    wireSidebar();
     var bannerUpgrade = document.getElementById("banner-upgrade");
     if (bannerUpgrade) bannerUpgrade.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
     document.getElementById("modal-overlay").onclick = function(e) {
@@ -620,6 +673,8 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
 
     // Fetch stats
     api("GET", "/v1/user/agents/" + agentId + "/stats").then(function(s) {
+      var bcName = document.getElementById("agent-bc-name");
+      if (bcName) bcName.textContent = s.name || agentId;
       var isOn = s.heartbeat_status === "online" || s.heartbeat_status === "busy" || s.heartbeat_status === "idle";
       var statusCls = s.heartbeat_status === "busy" ? "busy" : (isOn ? "online" : "offline");
       var statusLabel = s.heartbeat_status || "unknown";
@@ -1808,15 +1863,19 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       app.innerHTML = '<div class="loading-page"><span class="spinner"></span></div>';
       return;
     }
-    var tier = user.subscription_tier || "free";
     app.innerHTML =
-      renderHeader(tier) +
+      '<div class="dashboard-shell">' +
+      renderSidebar("overview") +
+      '<div class="main-content">' +
       '<div class="page">' +
+      renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Activity"}]) +
       '<h1 style="margin-bottom:1.5rem">Account Overview</h1>' +
       '<div id="ov-content"><div class="loading-page"><span class="spinner"></span> Loading\u2026</div></div>' +
       '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
-    wireHeader();
+    wireSidebar();
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -1911,9 +1970,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var tierPrices = { free: "$0", hobby: "$5", team: "$25", scale: "$99" };
 
     app.innerHTML =
-      renderHeader(tier) +
+      '<div class="dashboard-shell">' +
+      renderSidebar("billing") +
+      '<div class="main-content">' +
       '<div class="page">' +
-      '<div class="back-link" id="back-link">\u2190 Back to agents</div>' +
+      renderBreadcrumb([{label:"MoltGrid",hash:"#/agents"},{label:"Billing"}]) +
       '<div class="dash-header"><h1>Billing & Plans</h1></div>' +
       '<div class="billing-grid">' +
 
@@ -1942,11 +2003,11 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       '</div></div>' +
 
       '</div></div>' +
+      '</div></div></div>' +
       '<div class="modal-overlay" id="modal-overlay"><div class="modal" id="modal-content"></div></div>';
 
     // Wire up
-    wireHeader();
-    document.getElementById("back-link").onclick = function() { navigate("#/agents"); };
+    wireSidebar();
     document.getElementById("modal-overlay").onclick = function(e) {
       if (e.target.id === "modal-overlay") e.target.classList.remove("active");
     };
@@ -2115,26 +2176,100 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     document.getElementById("cancel-go").onclick = function() { navigate("#/agents"); };
   }
 
-  // ── Shared header renderer ──
+  // ── Billing Failed Page (Task 3) ──
+  function renderBillingFailed(app) {
+    if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+
+    app.innerHTML =
+      '<div class="result-container"><div class="result-card">' +
+      '<div class="result-icon" style="color:#ef4444">&#10060;</div>' +
+      '<h1 style="color:#ef4444">Payment Failed</h1>' +
+      '<p class="subtitle">Your payment could not be processed. Please check your payment details and try again.</p>' +
+      '<button class="btn btn-accent" id="failed-retry" style="margin-top:0.5rem">Try again \u2192</button>' +
+      '</div></div>';
+
+    document.getElementById("failed-retry").onclick = function() { navigate("#/billing"); };
+  }
+
+  // ── Sidebar renderer ──
+  function renderSidebar(activeSection) {
+    var tier = (user && user.subscription_tier) || "free";
+    var tierColors = { free:"color:var(--text-dim);background:rgba(122,122,146,0.12);border:1px solid var(--border)", hobby:"color:var(--blue);background:rgba(68,136,255,0.1);border:1px solid rgba(68,136,255,0.2)", team:"color:var(--purple);background:rgba(187,136,255,0.1);border:1px solid rgba(187,136,255,0.2)", scale:"color:var(--yellow);background:rgba(255,204,0,0.1);border:1px solid rgba(255,204,0,0.2)" };
+    var tierStyle = tierColors[tier] || tierColors.free;
+    var items = [
+      { id:"agents",   icon:"&#x1F916;", label:"Agents",        hash:"#/agents" },
+      { id:"overview", icon:"&#x1F4CA;", label:"Activity",      hash:"#/overview" },
+      { id:"billing",  icon:"&#x1F4B3;", label:"Billing",       hash:"#/billing" },
+      { id:"docs",     icon:"&#x1F4D6;", label:"Docs",          href:"https://moltgrid.net/docs", external:true }
+    ];
+    var navHtml = items.map(function(it) {
+      var isActive = it.id === activeSection;
+      var cls = "sidebar-item" + (isActive ? " active" : "");
+      if (it.external) {
+        return '<a class="' + cls + '" href="' + it.href + '" target="_blank" rel="noopener">' +
+          '<span class="si-icon">' + it.icon + '</span>' + it.label + '</a>';
+      }
+      return '<div class="' + cls + '" data-nav="' + it.id + '" onclick="if(window._activityTimer){clearInterval(window._activityTimer);window._activityTimer=null;}navigate(\'' + it.hash + '\')">' +
+        '<span class="si-icon">' + it.icon + '</span>' + it.label + '</div>';
+    }).join("");
+    return '<div class="sidebar" id="mg-sidebar">' +
+      '<div class="sidebar-logo" id="sidebar-logo"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid"></div>' +
+      '<nav class="sidebar-nav">' + navHtml + '</nav>' +
+      '<div class="sidebar-footer">' +
+      '<div class="sf-email">' + esc((user && user.email) || "") + '</div>' +
+      '<span class="sf-tier" style="' + tierStyle + '">' + esc(tier) + '</span>' +
+      '<br><button class="sf-logout" id="sidebar-logout">Sign out</button>' +
+      '</div></div>' +
+      '<button class="sidebar-toggle" id="sidebar-toggle" aria-label="Menu">&#9776;</button>' +
+      '<div class="sidebar-overlay" id="sidebar-overlay"></div>';
+  }
+
+  function wireSidebar() {
+    var sidebar = document.getElementById("mg-sidebar");
+    var toggle = document.getElementById("sidebar-toggle");
+    var overlay = document.getElementById("sidebar-overlay");
+    if (toggle) {
+      toggle.onclick = function() {
+        sidebar.classList.toggle("open");
+        overlay.classList.toggle("active");
+      };
+    }
+    if (overlay) {
+      overlay.onclick = function() {
+        sidebar.classList.remove("open");
+        overlay.classList.remove("active");
+      };
+    }
+    var logoutBtn = document.getElementById("sidebar-logout");
+    if (logoutBtn) {
+      logoutBtn.onclick = function() {
+        if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; }
+        localStorage.removeItem("mg_token"); token = null; user = null; navigate("#/login");
+      };
+    }
+    var logoLink = document.getElementById("sidebar-logo");
+    if (logoLink) { logoLink.onclick = function() { if (_activityTimer) { clearInterval(_activityTimer); _activityTimer = null; } navigate("#/agents"); }; }
+  }
+
+  // ── Breadcrumb renderer ──
+  function renderBreadcrumb(crumbs) {
+    // crumbs: [{label, hash}] — last item has no hash (current)
+    var parts = crumbs.map(function(c, i) {
+      if (i < crumbs.length - 1) {
+        return '<span class="bc-link" onclick="if(window._activityTimer){clearInterval(window._activityTimer);window._activityTimer=null;}navigate(\'' + c.hash + '\')">' + esc(c.label) + '</span>';
+      }
+      return '<span class="bc-current">' + esc(c.label) + '</span>';
+    });
+    return '<div class="breadcrumb">' + parts.join('<span class="bc-sep"> &rsaquo; </span>') + '</div>';
+  }
+
+  // ── Shared header renderer (kept for auth pages only — sidebar replaces it for authenticated pages) ──
   function renderHeader(tier) {
-    return '<header>' +
-      '<a class="logo" id="logo-link"><img src="https://moltgrid.net/public/logo-full.png" alt="MoltGrid" style="height:28px;vertical-align:middle"></a>' +
-      '<div class="header-right">' +
-      '<span class="user-email">' + esc(user.email) + '</span>' +
-      '<span class="tier-badge tier-' + esc(tier) + '">' + esc(tier) + '</span>' +
-      '<button class="btn btn-ghost" id="overview-link" style="font-size:0.7rem">Overview</button>' +
-      '<button class="btn btn-ghost" id="billing-link" style="font-size:0.7rem">Billing</button>' +
-      '<button class="btn btn-ghost" id="logout-btn">Logout</button>' +
-      '</div></header>';
+    return ''; // Header replaced by sidebar on auth pages
   }
 
   function wireHeader() {
-    document.getElementById("logo-link").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/agents"); };
-    document.getElementById("logout-btn").onclick = function() { if (_activityTimer) clearInterval(_activityTimer); localStorage.removeItem("mg_token"); token = null; user = null; navigate("#/login"); };
-    var overviewLink = document.getElementById("overview-link");
-    if (overviewLink) overviewLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/overview"); };
-    var billingLink = document.getElementById("billing-link");
-    if (billingLink) billingLink.onclick = function() { if (_activityTimer) clearInterval(_activityTimer); navigate("#/billing"); };
+    // No-op: wiring now done by wireSidebar
   }
 
   // ── Register new agent ──
