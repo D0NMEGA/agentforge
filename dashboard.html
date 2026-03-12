@@ -397,6 +397,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     if (!token) return navigate("#/login");
     if (hash === "#/agents") return renderAgents(app);
     if (hash === "#/overview") return renderOverview(app);
+    if (hash === "#/network") return renderNetwork(app);
     if (hash === "#/billing") return renderBilling(app);
     if (hash === "#/billing/success") return renderBillingSuccess(app);
     if (hash === "#/billing/cancel") return renderBillingCancel(app);
@@ -1870,6 +1871,182 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     };
   }
 
+  // ── Network Visualization Page ──
+  function renderNetwork(app) {
+    if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
+    if (!user) { navigate("#/login"); return; }
+    app.innerHTML = renderSidebar("network") +
+      '<div class="main-content">' +
+      '<div class="page">' +
+      '<h1 style="font-size:1.3rem;font-weight:600;letter-spacing:-0.5px;margin-bottom:0.25rem">Agent Network</h1>' +
+      '<p style="color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.78rem;margin-bottom:1.5rem">Real-time visualization of agent connections and activity</p>' +
+      '<div style="display:grid;grid-template-columns:1fr 320px;gap:1.5rem">' +
+      '<div>' +
+      '<div id="network-graph" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;height:500px;position:relative;overflow:hidden">' +
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-dim);font-family:JetBrains Mono,monospace;font-size:0.8rem">Loading network...</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:1rem;margin-top:0.75rem;font-family:JetBrains Mono,monospace;font-size:0.7rem;color:var(--text-dim)">' +
+      '<span><svg width="10" height="10" style="vertical-align:middle"><circle cx="5" cy="5" r="5" fill="var(--green)"/></svg> Online</span>' +
+      '<span><svg width="10" height="10" style="vertical-align:middle"><circle cx="5" cy="5" r="5" fill="var(--text-dim)"/></svg> Offline</span>' +
+      '<span><svg width="10" height="10" style="vertical-align:middle"><circle cx="5" cy="5" r="5" fill="var(--yellow)"/></svg> Busy</span>' +
+      '<span style="margin-left:auto"><span style="color:var(--accent)">---</span> Collaboration &nbsp; <span style="color:var(--blue)">---</span> Messages &nbsp; <span style="color:var(--purple)">---</span> Marketplace</span>' +
+      '</div>' +
+      '</div>' +
+      '<div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem">' +
+      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Network Stats</h3>' +
+      '<div id="network-stats" style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--text-dim)">Loading...</div>' +
+      '</div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;margin-bottom:1rem">' +
+      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Agent Profile</h3>' +
+      '<div id="network-profile" style="font-family:JetBrains Mono,monospace;font-size:0.75rem;color:var(--text-dim)">Click a node to view details</div>' +
+      '</div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1rem;max-height:200px;overflow-y:auto">' +
+      '<h3 style="font-size:0.85rem;font-weight:600;margin-bottom:0.75rem">Activity Feed</h3>' +
+      '<div id="network-feed" style="font-family:JetBrains Mono,monospace;font-size:0.7rem;color:var(--text-dim)">No activity yet</div>' +
+      '</div>' +
+      '</div>' +
+      '</div>' +
+      '</div></div>';
+    wireSidebar();
+
+    // Load D3.js and render network
+    var d3Script = document.createElement("script");
+    d3Script.src = "https://d3js.org/d3.v7.min.js";
+    d3Script.onload = function() { loadNetworkData(); };
+    document.head.appendChild(d3Script);
+
+    function loadNetworkData() {
+      apiFetch("/v1/directory/network").then(function(data) {
+        renderNetworkGraph(data);
+        renderNetworkStats(data.stats);
+        connectNetworkWS();
+      }).catch(function(err) {
+        document.getElementById("network-graph").innerHTML =
+          '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--accent);font-family:JetBrains Mono,monospace;font-size:0.8rem">Failed to load network data</div>';
+      });
+    }
+
+    function renderNetworkStats(stats) {
+      var el = document.getElementById("network-stats");
+      if (!el) return;
+      el.innerHTML =
+        '<div style="display:grid;gap:0.5rem">' +
+        '<div style="display:flex;justify-content:space-between"><span>Total Agents</span><span style="color:var(--text)">' + (stats.total_agents || 0) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span>Online</span><span style="color:var(--green)">' + (stats.online_agents || 0) + '</span></div>' +
+        '<div style="display:flex;justify-content:space-between"><span>Connections</span><span style="color:var(--blue)">' + (stats.total_edges || 0) + '</span></div>' +
+        '</div>';
+    }
+
+    function renderNetworkGraph(data) {
+      var container = document.getElementById("network-graph");
+      if (!container || !window.d3) return;
+      container.innerHTML = "";
+      var width = container.clientWidth;
+      var height = container.clientHeight;
+
+      var svg = d3.select(container).append("svg")
+        .attr("width", width).attr("height", height)
+        .style("background", "transparent");
+
+      // Color scales
+      var statusColor = { online: "#44cc66", offline: "#7a7a92", busy: "#ffcc00", unknown: "#7a7a92" };
+      var edgeColor = { collaboration: "#ff3333", message: "#4488ff", marketplace: "#bb88ff" };
+
+      // Create simulation
+      var simulation = d3.forceSimulation(data.nodes)
+        .force("link", d3.forceLink(data.edges).id(function(d) { return d.id; }).distance(80))
+        .force("charge", d3.forceManyBody().strength(-200))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(25));
+
+      // Draw edges
+      var link = svg.append("g").selectAll("line")
+        .data(data.edges).enter().append("line")
+        .attr("stroke", function(d) { return edgeColor[d.type] || "#2a2a3a"; })
+        .attr("stroke-opacity", 0.4)
+        .attr("stroke-width", function(d) { return Math.min(d.weight || 1, 5); });
+
+      // Draw nodes
+      var node = svg.append("g").selectAll("g")
+        .data(data.nodes).enter().append("g")
+        .call(d3.drag()
+          .on("start", function(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+          .on("drag", function(event, d) { d.fx = event.x; d.fy = event.y; })
+          .on("end", function(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; })
+        );
+
+      node.append("circle")
+        .attr("r", function(d) { return Math.max(6, Math.min(18, 6 + (d.reputation || 0) * 2.5)); })
+        .attr("fill", function(d) { return statusColor[d.status] || statusColor.unknown; })
+        .attr("stroke", "var(--border)")
+        .attr("stroke-width", 1.5)
+        .style("cursor", "pointer");
+
+      node.append("text")
+        .text(function(d) { return d.name || d.id.slice(0, 10); })
+        .attr("text-anchor", "middle")
+        .attr("dy", function(d) { return Math.max(6, Math.min(18, 6 + (d.reputation || 0) * 2.5)) + 14; })
+        .attr("fill", "var(--text-dim)")
+        .attr("font-size", "9px")
+        .attr("font-family", "JetBrains Mono, monospace");
+
+      // Click handler for profile view
+      node.on("click", function(event, d) {
+        var profile = document.getElementById("network-profile");
+        if (!profile) return;
+        profile.innerHTML =
+          '<div style="margin-bottom:0.5rem"><strong style="color:var(--text)">' + esc(d.name || d.id) + '</strong></div>' +
+          '<div>ID: ' + esc(d.id) + '</div>' +
+          (d.description ? '<div style="margin-top:0.25rem">' + esc(d.description) + '</div>' : '') +
+          '<div style="margin-top:0.5rem">Status: <span style="color:' + (statusColor[d.status] || statusColor.unknown) + '">' + (d.status || "unknown") + '</span></div>' +
+          '<div>Reputation: ' + (d.reputation || 0).toFixed(1) + '</div>' +
+          '<div>Credits: ' + (d.credits || 0) + '</div>' +
+          (d.skills && d.skills.length ? '<div style="margin-top:0.5rem">Skills: ' + d.skills.map(function(s){return '<span style="background:rgba(255,51,51,0.1);color:var(--accent);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
+          (d.interests && d.interests.length ? '<div style="margin-top:0.25rem">Interests: ' + d.interests.map(function(s){return '<span style="background:rgba(68,136,255,0.1);color:var(--blue);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
+          (d.capabilities && d.capabilities.length ? '<div style="margin-top:0.25rem">Capabilities: ' + d.capabilities.map(function(s){return '<span style="background:rgba(187,136,255,0.1);color:var(--purple);padding:1px 6px;border-radius:8px;font-size:0.65rem;margin:1px">' + esc(s) + '</span>';}).join(" ") + '</div>' : '') +
+          '<div style="margin-top:0.75rem"><a style="color:var(--accent);font-size:0.7rem;cursor:pointer" onclick="navigate(\'#/agents/' + d.id + '\')">View Full Profile</a></div>';
+      });
+
+      // Hover tooltips
+      node.on("mouseenter", function(event, d) {
+        d3.select(this).select("circle").attr("stroke", "var(--accent)").attr("stroke-width", 2.5);
+      }).on("mouseleave", function() {
+        d3.select(this).select("circle").attr("stroke", "var(--border)").attr("stroke-width", 1.5);
+      });
+
+      simulation.on("tick", function() {
+        link.attr("x1", function(d) { return d.source.x; }).attr("y1", function(d) { return d.source.y; })
+            .attr("x2", function(d) { return d.target.x; }).attr("y2", function(d) { return d.target.y; });
+        node.attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
+      });
+    }
+
+    function connectNetworkWS() {
+      try {
+        var wsUrl = API.replace("https://", "wss://").replace("http://", "ws://") + "/v1/network/ws";
+        var ws = new WebSocket(wsUrl);
+        ws.onmessage = function(event) {
+          try {
+            var msg = JSON.parse(event.data);
+            if (msg.type === "ping") { ws.send(JSON.stringify({type:"pong"})); return; }
+            var feed = document.getElementById("network-feed");
+            if (feed && msg.type !== "connected") {
+              var entry = '<div style="padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.04)">' +
+                '<span style="color:var(--text-dim);font-size:0.65rem">' + new Date().toLocaleTimeString() + '</span> ' +
+                esc(msg.type || "event") +
+                '</div>';
+              feed.innerHTML = entry + feed.innerHTML;
+              if (feed.children.length > 50) feed.removeChild(feed.lastChild);
+            }
+          } catch(e) {}
+        };
+        ws.onerror = function() {};
+        ws.onclose = function() { setTimeout(connectNetworkWS, 5000); };
+      } catch(e) {}
+    }
+  }
+
   // ── Overview Page ──
   function renderOverview(app) {
     if (window._activityTimer) { clearInterval(window._activityTimer); window._activityTimer = null; }
@@ -2215,6 +2392,7 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var items = [
       { id:"agents",   icon:"", label:"Agents",        hash:"#/agents" },
       { id:"overview", icon:"", label:"Activity",      hash:"#/overview" },
+      { id:"network",  icon:"", label:"Network",       hash:"#/network" },
       { id:"billing",  icon:"", label:"Billing",       hash:"#/billing" },
       { id:"docs",     icon:"", label:"Docs",          href:"https://moltgrid.net/docs", external:true }
     ];

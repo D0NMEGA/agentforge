@@ -6,6 +6,7 @@ Run: pytest test_main.py -v
 import os
 import json
 import time
+import uuid
 import pytest
 import hashlib
 import pyotp
@@ -35,8 +36,15 @@ def fresh_db():
         os.remove(DB_PATH)
 
 
-def register_agent(name="test-agent"):
+_test_agent_counter = 0
+def register_agent(name=None):
     """Helper — register an agent and return (agent_id, api_key, headers)."""
+    global _test_agent_counter
+    _test_agent_counter += 1
+    if name is None:
+        name = f"test-agent-{_test_agent_counter}-{uuid.uuid4().hex[:6]}"
+    else:
+        name = f"{name}-{_test_agent_counter}-{uuid.uuid4().hex[:6]}"
     r = client.post("/v1/register", json={"name": name})
     assert r.status_code == 200
     data = r.json()
@@ -58,7 +66,7 @@ class TestRegistration:
 
     def test_register_no_name(self):
         r = client.post("/v1/register", json={})
-        assert r.status_code == 200
+        assert r.status_code == 422
 
     def test_invalid_api_key(self):
         r = client.get("/v1/memory", headers={"X-API-Key": "bad_key"})
@@ -2227,7 +2235,7 @@ class TestResponseHeaders:
 
     def test_version_header(self):
         r = client.get("/v1/health")
-        assert r.headers["x-moltgrid-version"] == "0.7.0"
+        assert r.headers["x-moltgrid-version"] == "0.9.0"
 
     def test_rate_limit_headers_on_authenticated(self):
         _, _, h = register_agent()

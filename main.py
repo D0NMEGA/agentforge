@@ -44,6 +44,8 @@ import qrcode
 import qrcode.image.svg
 import base64
 import io
+import re as _re
+import html as _html
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -129,6 +131,12 @@ async def lifespan(app):
         logger.info("Initial uptime check completed")
     except Exception as e:
         logger.error(f"Initial uptime check failed: {e}")
+    # Pre-warm embedding model to avoid cold-start latency on first vector request
+    try:
+        _get_embed_model().encode("warmup", convert_to_numpy=True)
+        logger.info("Embedding model pre-warmed successfully")
+    except Exception as e:
+        logger.warning(f"Embedding model pre-warm failed (will lazy-load): {e}")
     yield
     # Shutdown: nothing to clean up (daemon threads auto-exit)
 
@@ -136,7 +144,7 @@ app = FastAPI(
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
-    version="0.7.0",
+    version="0.9.0",
     lifespan=lifespan,
 )
 
@@ -540,6 +548,8 @@ def init_db():
         ("display_name", "TEXT"),
         ("featured", "INTEGER DEFAULT 0"),
         ("verified", "INTEGER DEFAULT 0"),
+        ("skills", "TEXT"),
+        ("interests", "TEXT"),
     ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {typedef}")
@@ -2440,8 +2450,19 @@ def get_template(template_id: str):
 # REGISTRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _sanitize_text(text: Optional[str]) -> Optional[str]:
+    """Strip HTML tags and escape to prevent XSS. Returns None for None input."""
+    if text is None:
+        return None
+    # Remove HTML tags
+    cleaned = _re.sub(r'<[^>]+>', '', text)
+    # Escape remaining HTML entities
+    cleaned = _html.escape(cleaned)
+    return cleaned.strip()
+
+
 class RegisterRequest(BaseModel):
-    name: Optional[str] = Field(None, max_length=64, description="Display name for your agent")
+    name: str = Field(..., min_length=1, max_length=64, description="Display name for your agent")
     template_id: Optional[str] = Field(None, max_length=64, description="Optional template ID to pre-load starter code into agent memory")
 
 class RegisterResponse(BaseModel):
@@ -2472,11 +2493,23 @@ WELCOME_MESSAGE = (
 def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_optional_user_id)):
     """Register a new agent and receive an API key. Free. No payment required.
     If a Bearer token is provided, the agent is linked to that user account."""
+    # Sanitize name to prevent XSS
+    req.name = _sanitize_text(req.name)
+    if not req.name:
+        raise HTTPException(422, "Name is required and cannot be empty after sanitization")
+
     agent_id = f"agent_{uuid.uuid4().hex[:12]}"
     api_key = generate_api_key()
     now = datetime.now(timezone.utc).isoformat()
 
     with get_db() as db:
+        # Check for duplicate agent name
+        existing = db.execute(
+            "SELECT agent_id FROM agents WHERE name = ?", (req.name,)
+        ).fetchone()
+        if existing:
+            raise HTTPException(409, f"An agent with name '{req.name}' already exists. Choose a different name.")
+
         # Enforce max_agents limit if user is authenticated
         if owner_id:
             user = db.execute("SELECT max_agents FROM users WHERE user_id = ?", (owner_id,)).fetchone()
@@ -4303,16 +4336,22 @@ def shared_memory_namespaces(agent_id: str = Depends(get_agent_id)):
 class DirectoryUpdateRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=512, description="What your agent does")
     capabilities: Optional[List[str]] = Field(None, max_length=20, description="List of capabilities")
+    skills: Optional[List[str]] = Field(None, max_length=20, description="Technical skills (e.g. python, data_analysis)")
+    interests: Optional[List[str]] = Field(None, max_length=20, description="Topics/domains of interest (e.g. AI, finance)")
     public: bool = Field(False, description="Whether to list in the public directory")
 
 @app.put("/v1/directory/me", tags=["Directory"])
 def directory_update(req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your agent's directory listing."""
+    # Sanitize text fields to prevent XSS
+    req.description = _sanitize_text(req.description)
     caps_json = json.dumps(req.capabilities) if req.capabilities else None
+    skills_json = json.dumps(req.skills) if req.skills else None
+    interests_json = json.dumps(req.interests) if req.interests else None
     with get_db() as db:
         db.execute(
-            "UPDATE agents SET description=?, capabilities=?, public=? WHERE agent_id=?",
-            (req.description, caps_json, int(req.public), agent_id)
+            "UPDATE agents SET description=?, capabilities=?, skills=?, interests=?, public=? WHERE agent_id=?",
+            (req.description, caps_json, skills_json, interests_json, int(req.public), agent_id)
         )
     return {"status": "updated", "agent_id": agent_id, "public": req.public}
 
@@ -4321,13 +4360,15 @@ def directory_me(agent_id: str = Depends(get_agent_id)):
     """Get your own directory profile."""
     with get_db() as db:
         row = db.execute(
-            "SELECT agent_id, name, description, capabilities, public, available, looking_for, "
+            "SELECT agent_id, name, description, capabilities, skills, interests, public, available, looking_for, "
             "busy_until, reputation, reputation_count, credits, heartbeat_at, heartbeat_status, "
             "heartbeat_interval, created_at FROM agents WHERE agent_id=?",
             (agent_id,)
         ).fetchone()
     d = dict(row)
     d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+    d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
+    d["interests"] = json.loads(d["interests"]) if d.get("interests") else []
     d["looking_for"] = json.loads(d["looking_for"]) if d["looking_for"] else []
     d["public"] = bool(d["public"])
     d["available"] = bool(d.get("available", 1))
@@ -4339,7 +4380,7 @@ def directory_list(
     limit: int = Query(50, le=200),
 ):
     """Browse the public agent directory. No auth required."""
-    cols = "agent_id, name, description, capabilities, available, reputation, credits, created_at, heartbeat_status, featured, verified"
+    cols = "agent_id, name, description, capabilities, skills, interests, available, reputation, credits, created_at, heartbeat_status, featured, verified"
     with get_db() as db:
         if capability:
             rows = db.execute(
@@ -4357,6 +4398,8 @@ def directory_list(
     for r in rows:
         d = dict(r)
         d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+        d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
+        d["interests"] = json.loads(d["interests"]) if d.get("interests") else []
         d["available"] = bool(d.get("available", 1))
         d["featured"] = bool(d.get("featured", 0))
         d["verified"] = bool(d.get("verified", 0))
@@ -4500,7 +4543,10 @@ class CollaborationRequest(BaseModel):
 
 @app.get("/v1/directory/search", tags=["Directory"])
 def directory_search(
+    q: Optional[str] = Query(None, description="Text search query — matches name, description, capabilities, skills, interests"),
     capability: Optional[str] = None,
+    skill: Optional[str] = Query(None, description="Filter by skill"),
+    interest: Optional[str] = Query(None, description="Filter by interest"),
     available: Optional[bool] = None,
     online: Optional[bool] = None,
     last_seen_before: Optional[str] = Query(None, description="ISO timestamp — filter agents last seen before this time"),
@@ -4511,9 +4557,19 @@ def directory_search(
     now = datetime.now(timezone.utc).isoformat()
     conditions = ["public=1"]
     params: list = []
+    if q:
+        conditions.append("(name LIKE ? OR description LIKE ? OR capabilities LIKE ? OR skills LIKE ? OR interests LIKE ?)")
+        q_like = f"%{q}%"
+        params.extend([q_like, q_like, q_like, q_like, q_like])
     if capability:
         conditions.append("capabilities LIKE ?")
         params.append(f"%{capability}%")
+    if skill:
+        conditions.append("skills LIKE ?")
+        params.append(f"%{skill}%")
+    if interest:
+        conditions.append("interests LIKE ?")
+        params.append(f"%{interest}%")
     if available is True:
         conditions.append("available=1 AND (busy_until IS NULL OR busy_until < ?)")
         params.append(now)
@@ -4529,7 +4585,7 @@ def directory_search(
         params.append(min_reputation)
     where = " AND ".join(conditions)
     params.append(limit)
-    cols = ("agent_id, name, description, capabilities, available, looking_for, busy_until, "
+    cols = ("agent_id, name, description, capabilities, skills, interests, available, looking_for, busy_until, "
             "reputation, credits, heartbeat_status, heartbeat_at, created_at")
     with get_db() as db:
         rows = db.execute(
@@ -4540,6 +4596,8 @@ def directory_search(
     for r in rows:
         d = dict(r)
         d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+        d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
+        d["interests"] = json.loads(d["interests"]) if d.get("interests") else []
         d["looking_for"] = json.loads(d["looking_for"]) if d["looking_for"] else []
         d["available"] = bool(d.get("available", 1))
         agents.append(d)
@@ -6623,6 +6681,22 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
 # SKILL.MD — public agent field guide (no auth required)
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@app.get("/heartbeat.md", tags=["System"])
+async def serve_heartbeat_md():
+    hb_path = os.path.join(os.path.dirname(__file__), "heartbeat.md")
+    with open(hb_path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
+
+
+@app.get("/v1/heartbeat.md", tags=["System"])
+async def serve_heartbeat_md_v1():
+    hb_path = os.path.join(os.path.dirname(__file__), "heartbeat.md")
+    with open(hb_path) as f:
+        content = f.read()
+    return Response(content=content, media_type="text/markdown")
+
+
 @app.get("/skill.md", tags=["System"])
 async def serve_skill_md():
     skill_path = os.path.join(os.path.dirname(__file__), "skill.md")
@@ -6637,6 +6711,140 @@ async def serve_skill_md_v1():
     with open(skill_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NETWORK VISUALIZATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/v1/directory/network", tags=["Directory"])
+def directory_network():
+    """Get network graph data for agent visualization. No auth required.
+    Returns nodes (agents) and edges (collaborations/messages between them)."""
+    now = datetime.now(timezone.utc).isoformat()
+    with get_db() as db:
+        # Get all public agents as nodes
+        agent_rows = db.execute(
+            "SELECT agent_id, name, description, capabilities, skills, interests, "
+            "reputation, reputation_count, credits, heartbeat_status, heartbeat_at, "
+            "available, featured, verified, created_at "
+            "FROM agents WHERE public=1 ORDER BY reputation DESC LIMIT 200"
+        ).fetchall()
+
+        nodes = []
+        agent_ids = set()
+        for r in agent_rows:
+            d = dict(r)
+            agent_ids.add(d["agent_id"])
+            nodes.append({
+                "id": d["agent_id"],
+                "name": d["name"],
+                "description": d["description"],
+                "skills": json.loads(d["skills"]) if d.get("skills") else [],
+                "interests": json.loads(d["interests"]) if d.get("interests") else [],
+                "capabilities": json.loads(d["capabilities"]) if d["capabilities"] else [],
+                "status": d["heartbeat_status"] or "unknown",
+                "reputation": d["reputation"] or 0.0,
+                "credits": d["credits"] or 0,
+                "available": bool(d.get("available", 1)),
+                "featured": bool(d.get("featured", 0)),
+                "verified": bool(d.get("verified", 0)),
+                "created_at": d["created_at"],
+            })
+
+        # Get collaboration edges
+        collab_rows = db.execute(
+            "SELECT agent_id, partner_agent, COUNT(*) as weight, "
+            "AVG(rating) as avg_rating, MAX(created_at) as last_collab "
+            "FROM collaborations GROUP BY agent_id, partner_agent"
+        ).fetchall()
+
+        edges = []
+        for r in collab_rows:
+            d = dict(r)
+            if d["agent_id"] in agent_ids and d["partner_agent"] in agent_ids:
+                edges.append({
+                    "source": d["agent_id"],
+                    "target": d["partner_agent"],
+                    "type": "collaboration",
+                    "weight": d["weight"],
+                    "avg_rating": round(d["avg_rating"], 1) if d["avg_rating"] else 0,
+                    "last_activity": d["last_collab"],
+                })
+
+        # Get message edges (aggregate relay messages between public agents)
+        msg_rows = db.execute(
+            "SELECT from_agent, to_agent, COUNT(*) as count, MAX(created_at) as last_msg "
+            "FROM relay GROUP BY from_agent, to_agent HAVING count > 0"
+        ).fetchall()
+
+        for r in msg_rows:
+            d = dict(r)
+            if d["from_agent"] in agent_ids and d["to_agent"] in agent_ids:
+                edges.append({
+                    "source": d["from_agent"],
+                    "target": d["to_agent"],
+                    "type": "message",
+                    "weight": d["count"],
+                    "last_activity": d["last_msg"],
+                })
+
+        # Get marketplace task edges
+        task_rows = db.execute(
+            "SELECT creator_agent, claimed_by, COUNT(*) as count, MAX(created_at) as last_task "
+            "FROM marketplace WHERE claimed_by IS NOT NULL "
+            "GROUP BY creator_agent, claimed_by"
+        ).fetchall()
+
+        for r in task_rows:
+            d = dict(r)
+            if d["creator_agent"] in agent_ids and d["claimed_by"] in agent_ids:
+                edges.append({
+                    "source": d["creator_agent"],
+                    "target": d["claimed_by"],
+                    "type": "marketplace",
+                    "weight": d["count"],
+                    "last_activity": d["last_task"],
+                })
+
+    # Network stats
+    online_count = sum(1 for n in nodes if n["status"] == "online")
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_agents": len(nodes),
+            "online_agents": online_count,
+            "total_edges": len(edges),
+        }
+    }
+
+
+# Connected WebSocket clients for network events
+_network_ws_clients: list = []
+
+@app.websocket("/v1/network/ws")
+async def network_ws(websocket: WebSocket):
+    """Real-time network visualization events. No auth required for viewing."""
+    await websocket.accept()
+    _network_ws_clients.append(websocket)
+    await websocket.send_json({"type": "connected", "message": "Network visualization stream connected"})
+
+    try:
+        while True:
+            try:
+                msg = await asyncio.wait_for(websocket.receive_json(), timeout=30)
+                if msg.get("type") == "pong":
+                    pass
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        if websocket in _network_ws_clients:
+            _network_ws_clients.remove(websocket)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

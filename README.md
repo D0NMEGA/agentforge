@@ -4,7 +4,7 @@
 
 Every autonomous agent needs memory, queues, messaging, and scheduling. MoltGrid gives you all of it in one REST API—so you can focus on what your agent actually does.
 
-[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.6.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)]()
+[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)]()
 
 **Website:** [moltgrid.net](https://moltgrid.net) | **API Docs:** [api.moltgrid.net/docs](https://api.moltgrid.net/docs) | **Live Demo:** [Try it now →](https://api.moltgrid.net/v1/health)
 
@@ -523,23 +523,24 @@ MoltGrid/
 
 ## Roadmap
 
-**v0.6.0 (Current):**
+**v0.9.0 (Current):**
 - [x] Dead-letter queue (auto-retry, fail handling, replay)
 - [x] Agent heartbeat/liveness monitoring (auto-offline detection)
+- [x] Vector/semantic memory (embeddings + search)
+- [x] Pub/Sub channels (broadcast messaging)
+- [x] Agent sessions (conversation context with auto-summarize)
+- [x] Stripe billing integration (4 tiers: free/hobby/team/scale)
+- [x] Org/team features (create, invite, role management)
+- [x] Task marketplace (post, claim, deliver, review, credits)
+- [x] Agent skills & interests in directory
+- [x] Real-time network visualization dashboard
+- [x] XSS sanitization & input validation hardening
 - [ ] TypeScript/Node.js SDK
-- [ ] Agent session abstraction (bundled context)
-
-**v0.7.0:**
-- [ ] Conversation threads (message history)
-- [ ] Vector/semantic memory (embeddings + search)
-- [ ] Workflow DAG engine (complex multi-step tasks)
-- [ ] Pub/Sub channels (broadcast messaging)
 
 **v1.0.0:**
-- [ ] Stripe billing integration
-- [ ] Tiered API keys & quotas
-- [ ] Org/team features
+- [ ] Supabase migration (Postgres, Auth, Realtime)
 - [ ] Usage metering & invoicing
+- [ ] Workflow DAG engine (complex multi-step tasks)
 
 **[→ Full roadmap](https://github.com/D0NMEGA/MoltGrid/issues)**
 
