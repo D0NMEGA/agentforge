@@ -1542,6 +1542,37 @@ def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
         "schedules_active": schedules,
     }
 
+@app.patch("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
+def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user_id)):
+    """Rename an owned agent. Updates name everywhere (directory, messages, etc)."""
+    import re
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 64:
+        raise HTTPException(422, "Name must be 1-64 characters")
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9 _\-]{0,63}$', name):
+        raise HTTPException(422, "Letters, numbers, spaces, hyphens, underscores only — must start with letter or number")
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        db.execute("UPDATE agents SET name=? WHERE agent_id=?", (name, agent_id))
+    _log_audit("agent.rename", user_id=user_id, agent_id=agent_id)
+    return {"status": "renamed", "agent_id": agent_id, "name": name}
+
+@app.post("/v1/user/agents/{agent_id}/rotate-key", tags=["User Dashboard"])
+def user_rotate_key(agent_id: str, user_id: str = Depends(get_user_id)):
+    """Rotate API key for an owned agent. Returns new key; old key immediately invalid."""
+    new_key = generate_api_key()
+    with get_db() as db:
+        _verify_agent_ownership(db, agent_id, user_id)
+        db.execute("UPDATE agents SET api_key_hash=? WHERE agent_id=?", (hash_key(new_key), agent_id))
+    _log_audit("apikey.rotate", user_id=user_id, agent_id=agent_id)
+    return {
+        "status": "rotated",
+        "agent_id": agent_id,
+        "api_key": new_key,
+        "rotated_at": datetime.now(timezone.utc).isoformat(),
+        "message": "Store your new API key securely. The old key is now invalid.",
+    }
+
 @app.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
 def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
     """Delete an owned agent and all its data."""
@@ -6054,7 +6085,7 @@ def admin_contact(
 @app.get("/admin/login", response_class=HTMLResponse, tags=["Admin"])
 def admin_login_page():
     """Serve the admin login page."""
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin_login.html")
+    html_path = _find_html("admin_login.html")
     try:
         with open(html_path, "r") as f:
             return HTMLResponse(content=f.read())
@@ -6064,7 +6095,7 @@ def admin_login_page():
 @app.get("/admin", response_class=HTMLResponse, tags=["Admin"])
 def admin_page():
     """Serve the admin dashboard page."""
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
+    html_path = _find_html("admin.html")
     try:
         with open(html_path, "r") as f:
             return HTMLResponse(content=f.read())
@@ -6076,11 +6107,22 @@ def admin_page():
 # USER DASHBOARD (HTML)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_dashboard_html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
+_backend_dir = os.path.dirname(os.path.abspath(__file__))
+_web_dir = os.path.join(os.path.dirname(_backend_dir), "moltgrid-web") if not os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")) else None
+
+def _find_html(filename: str) -> str:
+    """Find an HTML file — check backend dir first, then moltgrid-web sibling."""
+    path = os.path.join(_backend_dir, filename)
+    if os.path.exists(path):
+        return path
+    alt = os.path.join("/opt/moltgrid-web", filename)
+    if os.path.exists(alt):
+        return alt
+    return path  # fallback to original (will raise FileNotFoundError)
 
 def _serve_dashboard():
     try:
-        with open(_dashboard_html_path, "r") as f:
+        with open(_find_html("dashboard.html"), "r") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         raise HTTPException(404, "Dashboard not found")
@@ -6374,7 +6416,7 @@ def session_delete(session_id: str, agent_id: str = Depends(get_agent_id)):
 @app.get("/contact", response_class=HTMLResponse, tags=["System"])
 def contact_page():
     """Serve the contact form page."""
-    html_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "contact.html")
+    html_path = _find_html("contact.html")
     try:
         with open(html_path, "r") as f:
             return HTMLResponse(content=f.read())

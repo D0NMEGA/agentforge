@@ -3034,19 +3034,19 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
     var mc = document.getElementById("modal-content");
     overlay.classList.add("active");
 
-    // Step 1: Confirmation
+    // Step 1: Confirmation — this unlinks the old agent and issues a new key
     mc.innerHTML =
-      '<h2>&#128273; Regenerate API Key</h2>' +
-      '<p class="subtitle">Issue a brand-new API key for this agent.</p>' +
+      '<h2>Regenerate API Key</h2>' +
+      '<p class="subtitle">Issue a new API key and re-register this agent slot.</p>' +
       '<div class="alert alert-error" style="margin:1rem 0;font-size:0.82rem;line-height:1.5">' +
       '<strong>\u26A0 Warning</strong><br>' +
       'The current API key will be <strong>immediately and permanently invalidated</strong>. ' +
-      'Any code, scripts, or integrations using the old key will stop working right away. ' +
-      'Make sure you update all usages with the new key.' +
+      'The previous AI agent using this key will be disconnected. ' +
+      'You can then send the new key to a different AI agent.' +
       '</div>' +
       '<div class="modal-actions">' +
       '<button class="btn btn-ghost" id="rk-cancel">Cancel</button>' +
-      '<button class="btn btn-accent" style="background:var(--red)" id="rk-confirm">Regenerate Key</button>' +
+      '<button class="btn btn-accent" style="background:var(--red)" id="rk-confirm">Regenerate &amp; Re-register</button>' +
       '</div>';
 
     document.getElementById("rk-cancel").onclick = function() { overlay.classList.remove("active"); };
@@ -3056,49 +3056,16 @@ input:checked + .toggle-slider:before { transform:translateX(16px); }
       btn.disabled = true; btn.textContent = "Regenerating\u2026";
 
       api("POST", "/v1/user/agents/" + agentId + "/rotate-key").then(function(data) {
-        var newKey = data.api_key;
-
-        // Step 2: Show new key (one-time)
-        mc.innerHTML =
-          '<h2>&#128273; New API Key</h2>' +
-          '<p class="warning-text">\u26A0 Save this key now \u2014 it will not be shown again.</p>' +
-          '<div class="api-key-box" style="margin:1rem 0">' +
-          '<span id="rk-key-text" style="word-break:break-all">' + esc(newKey) + '</span>' +
-          '<button class="copy-btn" id="rk-copy">Copy</button>' +
-          '</div>' +
-          '<p style="font-size:0.75rem;color:var(--text-dim);margin-bottom:1rem">' +
-          'Rotated at: ' + esc(data.rotated_at || new Date().toISOString()) +
-          '</p>' +
-          '<div class="modal-actions">' +
-          '<button class="btn btn-accent" id="rk-done">Done \u2014 I saved my key</button>' +
-          '</div>';
-
-        document.getElementById("rk-copy").onclick = function() {
-          navigator.clipboard.writeText(newKey);
-          this.textContent = "Copied!";
-          var self = this;
-          setTimeout(function() { self.textContent = "Copy"; }, 2000);
-        };
-
-        document.getElementById("rk-done").onclick = function() {
-          overlay.classList.remove("active");
-          showToast("API key regenerated. Old key is now invalid.", "success");
-
-          // Prepend to activity feed immediately
-          var list = document.getElementById("activity-list");
-          if (list) {
-            var div = document.createElement("div");
-            div.className = "activity-item";
-            div.innerHTML =
-              '<div class="activity-icon">&#128273;</div>' +
-              '<div class="activity-text">API key regenerated</div>' +
-              '<div class="activity-time">just now</div>';
-            list.insertBefore(div, list.firstChild);
-          }
-        };
+        overlay.classList.remove("active");
+        // Get agent name for the modal
+        api("GET", "/v1/user/agents/" + agentId + "/stats").then(function(s) {
+          showApiKeyModal(agentId, data.api_key, s.name || agentId);
+        }).catch(function() {
+          showApiKeyModal(agentId, data.api_key, agentId);
+        });
       }).catch(function(err) {
         mc.innerHTML =
-          '<h2>&#128273; Regenerate API Key</h2>' +
+          '<h2>Regenerate API Key</h2>' +
           '<div class="alert alert-error" style="margin:1rem 0">' + esc(err.detail || "Failed to regenerate key") + '</div>' +
           '<div class="modal-actions"><button class="btn btn-ghost" id="rk-cancel">Close</button></div>';
         document.getElementById("rk-cancel").onclick = function() { overlay.classList.remove("active"); };
