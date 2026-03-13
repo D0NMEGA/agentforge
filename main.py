@@ -793,6 +793,18 @@ def init_db():
     except Exception:
         pass  # column already exists
 
+    # Migrate vector_memory — add importance and access_count for composite scoring
+    vm_existing = {row[1] for row in conn.execute('PRAGMA table_info(vector_memory)').fetchall()}
+    for col, typedef in [
+        ('importance', 'REAL DEFAULT 0.5'),
+        ('access_count', 'INTEGER DEFAULT 0'),
+    ]:
+        if col not in vm_existing:
+            try:
+                conn.execute(f'ALTER TABLE vector_memory ADD COLUMN {col} {typedef}')
+            except Exception:
+                pass
+
     conn.commit()
     conn.close()
 
@@ -1654,6 +1666,8 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
         db.execute("DELETE FROM rate_limits WHERE agent_id=?", (agent_id,))
         db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (agent_id, agent_id))
         db.execute("DELETE FROM marketplace WHERE creator_agent=?", (agent_id,))
+        db.execute("DELETE FROM vector_memory WHERE agent_id=?", (agent_id,))
+        db.execute("DELETE FROM memory_access_log WHERE agent_id=?", (agent_id,))
         db.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
     _log_audit("agent.delete", user_id=user_id, agent_id=agent_id)
     return {"status": "deleted", "agent_id": agent_id}
@@ -1775,6 +1789,60 @@ def user_delete_account(user_id: str = Depends(get_user_id)):
         # Unlink agents (they become unowned, still functional)
         db.execute("UPDATE agents SET owner_id = NULL WHERE owner_id = ?", (user_id,))
     return {"user_id": user_id, "message": "Account deactivated. Agents unlinked."}
+
+
+@app.post("/v1/user/account/hard-delete", tags=["User Dashboard"])
+def user_hard_delete_account(user_id: str = Depends(get_user_id)):
+    """GDPR right to erasure. Permanently deletes all user data and owned agents."""
+    with get_db() as db:
+        agent_rows = db.execute("SELECT agent_id FROM agents WHERE owner_id=?", (user_id,)).fetchall()
+        for row in agent_rows:
+            aid = row["agent_id"]
+            db.execute("DELETE FROM memory WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM vector_memory WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM queue WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (aid, aid))
+            db.execute("DELETE FROM webhooks WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM scheduled_tasks WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM shared_memory WHERE owner_agent=?", (aid,))
+            db.execute("DELETE FROM rate_limits WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (aid, aid))
+            db.execute("DELETE FROM marketplace WHERE creator_agent=?", (aid,))
+            db.execute("DELETE FROM memory_access_log WHERE agent_id=?", (aid,))
+            db.execute("DELETE FROM agents WHERE agent_id=?", (aid,))
+        db.execute("DELETE FROM users WHERE user_id=?", (user_id,))
+    _log_audit("account.hard_delete", user_id=user_id)
+    return {"status": "deleted", "message": "All data permanently erased per GDPR Article 17."}
+
+
+@app.get("/v1/user/data-export", tags=["User Dashboard"])
+def user_data_export(user_id: str = Depends(get_user_id)):
+    """GDPR right to data portability. Export all user data as JSON."""
+    with get_db() as db:
+        user = db.execute("SELECT user_id, email, display_name, subscription_tier, created_at FROM users WHERE user_id=?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "User not found")
+        agents = db.execute("SELECT agent_id, name, display_name, status, created_at FROM agents WHERE owner_id=?", (user_id,)).fetchall()
+        export = {
+            "user": dict(user),
+            "agents": [],
+            "exported_at": datetime.utcnow().isoformat() + "Z",
+        }
+        for agent in agents:
+            aid = agent["agent_id"]
+            memories = db.execute("SELECT key, namespace, value, visibility, created_at, updated_at FROM memory WHERE agent_id=?", (aid,)).fetchall()
+            vectors = db.execute("SELECT key, namespace, text, metadata, created_at, updated_at FROM vector_memory WHERE agent_id=?", (aid,)).fetchall()
+            messages = db.execute("SELECT from_agent, to_agent, channel, payload, created_at FROM relay WHERE from_agent=? OR to_agent=?", (aid, aid)).fetchall()
+            jobs = db.execute("SELECT job_id, queue_name, payload, status, created_at FROM queue WHERE agent_id=?", (aid,)).fetchall()
+            export["agents"].append({
+                "agent": dict(agent),
+                "memory": [dict(m) for m in memories],
+                "vector_memory": [dict(v) for v in vectors],
+                "messages": [dict(m) for m in messages],
+                "jobs": [dict(j) for j in jobs],
+            })
+    _log_audit("data.export", user_id=user_id)
+    return export
 
 
 # ── Messages list ────────────────────────────────────────────────────────────
@@ -4374,12 +4442,14 @@ class VectorUpsertRequest(BaseModel):
     text: str = Field(..., max_length=10000, description="Text to embed")
     namespace: str = Field("default", max_length=64)
     metadata: Optional[dict] = Field(None, description="Optional metadata (stored as JSON)")
+    importance: float = Field(0.5, ge=0.0, le=1.0, description="Importance weight (0.0-1.0) for composite scoring")
 
 class VectorSearchRequest(BaseModel):
     query: str = Field(..., max_length=10000, description="Search query to embed")
     namespace: str = Field("default", max_length=64)
     limit: int = Field(5, ge=1, le=100, description="Number of results to return")
     min_similarity: float = Field(0.0, ge=0.0, le=1.0, description="Minimum cosine similarity threshold")
+    scoring: str = Field("cosine", description="Scoring mode: 'cosine' (similarity only) or 'composite' (0.4*recency + 0.2*importance + 0.4*cosine)")
 
 @app.post("/v1/vector/upsert", tags=["Vector Memory"])
 def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id)):
@@ -4398,12 +4468,12 @@ def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id
     with get_db() as db:
         # UPSERT: replace if (agent_id, namespace, key) exists
         db.execute("""
-            INSERT INTO vector_memory (id, agent_id, namespace, key, text, embedding, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO vector_memory (id, agent_id, namespace, key, text, embedding, metadata, importance, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_id, namespace, key)
-            DO UPDATE SET text=?, embedding=?, metadata=?, updated_at=?
-        """, (vec_id, agent_id, req.namespace, req.key, req.text, embedding_blob, metadata_json, now, now,
-              req.text, embedding_blob, metadata_json, now))
+            DO UPDATE SET text=?, embedding=?, metadata=?, importance=?, updated_at=?
+        """, (vec_id, agent_id, req.namespace, req.key, req.text, embedding_blob, metadata_json, req.importance, now, now,
+              req.text, embedding_blob, metadata_json, req.importance, now))
 
     return {
         "key": req.key,
@@ -4414,40 +4484,65 @@ def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id
 
 @app.post("/v1/vector/search", tags=["Vector Memory"])
 def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id)):
-    """Semantic search using cosine similarity. Returns top-K most similar entries.
+    """Semantic search with optional composite scoring.
+
+    Scoring modes:
+    - 'cosine': Pure cosine similarity (default, backward-compatible)
+    - 'composite': 0.4*recency + 0.2*importance + 0.4*cosine
 
     NOTE: Uses brute-force search. Fine for ~10K vectors per agent.
-    TODO: Add HNSW index (hnswlib) for >10K vectors.
     """
-    # Generate query embedding
     query_embedding = _embed_text(req.query)
+    now_ts = datetime.now(timezone.utc)
 
     with get_db() as db:
-        # Load all vectors for this agent+namespace
         rows = db.execute(
-            "SELECT key, text, embedding, metadata FROM vector_memory WHERE agent_id=? AND namespace=?",
+            "SELECT key, text, embedding, metadata, importance, access_count, updated_at "
+            "FROM vector_memory WHERE agent_id=? AND namespace=?",
             (agent_id, req.namespace)
         ).fetchall()
 
-        # Compute similarities
         results = []
         for row in rows:
             vec_embedding = np.frombuffer(row["embedding"], dtype=np.float32)
             similarity = _cosine_similarity(query_embedding, vec_embedding)
 
-            if similarity >= req.min_similarity:
-                results.append({
-                    "key": row["key"],
-                    "text": row["text"],
-                    "similarity": similarity,
-                    "metadata": json.loads(row["metadata"]) if row["metadata"] else None
-                })
+            if similarity < req.min_similarity:
+                continue
 
-        # Sort by similarity descending, take top K
-        results.sort(key=lambda x: x["similarity"], reverse=True)
+            if req.scoring == "composite":
+                # Recency: exponential decay, half-life = 7 days
+                try:
+                    updated = datetime.fromisoformat(row["updated_at"].replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    updated = now_ts
+                age_days = max((now_ts - updated).total_seconds() / 86400.0, 0.0)
+                recency = 2.0 ** (-age_days / 7.0)  # 1.0 at t=0, 0.5 at 7 days, 0.25 at 14 days
+
+                importance = float(row["importance"]) if row["importance"] is not None else 0.5
+                score = 0.4 * recency + 0.2 * importance + 0.4 * similarity
+            else:
+                score = similarity
+
+            results.append({
+                "key": row["key"],
+                "text": row["text"],
+                "score": round(score, 6),
+                "similarity": round(similarity, 6),
+                "metadata": json.loads(row["metadata"]) if row["metadata"] else None,
+            })
+
+        results.sort(key=lambda x: x["score"], reverse=True)
         results = results[:req.limit]
 
-    return {"results": results, "count": len(results)}
+        # Increment access_count for returned results
+        for r in results:
+            db.execute(
+                "UPDATE vector_memory SET access_count = access_count + 1 WHERE agent_id=? AND namespace=? AND key=?",
+                (agent_id, req.namespace, r["key"])
+            )
+
+    return {"results": results, "count": len(results), "scoring": req.scoring}
 
 @app.get("/v1/vector/{key}", tags=["Vector Memory"])
 def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):

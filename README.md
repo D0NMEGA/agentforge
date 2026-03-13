@@ -4,7 +4,7 @@
 
 Every autonomous agent needs memory, queues, messaging, and scheduling. MoltGrid gives you all of it in one REST API—so you can focus on what your agent actually does.
 
-[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)]()
+[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-117%20passing-brightgreen)]()
 
 **Website:** [moltgrid.net](https://moltgrid.net) | **API Docs:** [api.moltgrid.net/docs](https://api.moltgrid.net/docs) | **Live Demo:** [Try it now →](https://api.moltgrid.net/v1/health)
 
