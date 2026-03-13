@@ -42,6 +42,8 @@ import pyotp
 import urllib.parse
 import qrcode
 import qrcode.image.svg
+import ipaddress
+import socket
 import base64
 import io
 import re as _re
@@ -81,7 +83,13 @@ ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "")
 _fernet = Fernet(ENCRYPTION_KEY.encode()) if ENCRYPTION_KEY else None
 
 # JWT auth for user accounts
-JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+if not JWT_SECRET:
+    JWT_SECRET = secrets.token_hex(32)
+    logger.warning("JWT_SECRET not set — using ephemeral key (sessions will not survive restarts)")
+
+# MoltBook service-to-service auth
+MOLTBOOK_SERVICE_KEY = os.getenv("MOLTBOOK_SERVICE_KEY", "")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 7
 
@@ -1036,10 +1044,21 @@ def auth_signup(req: SignupRequest, response: Response):
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
-    # Set shared auth cookie readable by both moltgrid.net and api.moltgrid.net
+    # Set HttpOnly auth cookie (not readable by JS — prevents XSS token theft)
     response.set_cookie(
         key="mg_token",
         value=token,
+        domain=".moltgrid.net",
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=JWT_EXPIRY_DAYS * 86400,
+    )
+    # Non-sensitive indicator cookie for frontend logged-in state detection
+    response.set_cookie(
+        key="mg_logged_in",
+        value="1",
         domain=".moltgrid.net",
         path="/",
         httponly=False,
@@ -1107,13 +1126,24 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
                         (json.dumps(known_ips), row["user_id"])
                     )
     _log_audit("user.login", user_id=row["user_id"], ip_address=_get_client_ip(request))
-    # Set shared auth cookie readable by both moltgrid.net and api.moltgrid.net
+    # Set HttpOnly auth cookie (not readable by JS — prevents XSS token theft)
     response.set_cookie(
         key="mg_token",
         value=token,
         domain=".moltgrid.net",
         path="/",
-        httponly=False,  # JS needs to read this for homepage logged-in state
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=JWT_EXPIRY_DAYS * 86400,
+    )
+    # Non-sensitive indicator cookie for frontend logged-in state detection
+    response.set_cookie(
+        key="mg_logged_in",
+        value="1",
+        domain=".moltgrid.net",
+        path="/",
+        httponly=False,
         secure=True,
         samesite="lax",
         max_age=JWT_EXPIRY_DAYS * 86400,
@@ -2201,6 +2231,8 @@ def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
 
 @app.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
 def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
+    if not _is_safe_url(req.url):
+        raise HTTPException(400, "Webhook URL points to a private/internal address")
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES:
             raise HTTPException(400, f"Invalid event type: {et}")
@@ -2744,8 +2776,10 @@ class MoltBookRegisterRequest(BaseModel):
 
 # TODO: Add IP-based rate limiting in Phase 8
 @app.post("/v1/moltbook/register", tags=["Integrations"])
-def moltbook_register(req: MoltBookRegisterRequest):
-    """Auto-provision a MoltGrid agent for a new MoltBook user. No auth required (external service)."""
+def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
+    """Auto-provision a MoltGrid agent for a new MoltBook user. Requires X-Service-Key header."""
+    if not MOLTBOOK_SERVICE_KEY or not x_service_key or not _hmac.compare_digest(x_service_key, MOLTBOOK_SERVICE_KEY):
+        raise HTTPException(403, "Invalid or missing service key")
     now = datetime.now(timezone.utc).isoformat()
     # Check for duplicate
     with get_db() as db:
@@ -3677,9 +3711,39 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0  # seconds
 
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/32"),
+]
+
+def _is_safe_url(url: str) -> bool:
+    """Validate that a webhook URL does not point to a private/internal address (SSRF prevention)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname.lower() in ("localhost", "0.0.0.0"):
+            return False
+        resolved_ips = socket.getaddrinfo(hostname, None)
+        for _family, _type, _proto, _canonname, sockaddr in resolved_ips:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for net in _BLOCKED_NETWORKS:
+                if ip in net:
+                    return False
+        return True
+    except Exception:
+        return False
+
 @app.post("/v1/webhooks", response_model=WebhookResponse, tags=["Webhooks"])
 def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_agent_id)):
     """Register a webhook callback URL for event notifications."""
+    if not _is_safe_url(req.url):
+        raise HTTPException(400, "Webhook URL points to a private/internal address")
     for et in req.event_types:
         if et not in WEBHOOK_EVENT_TYPES:
             raise HTTPException(400, f"Invalid event type '{et}'. Valid: {sorted(WEBHOOK_EVENT_TYPES)}")
@@ -3816,6 +3880,9 @@ def _run_webhook_delivery_tick():
             body = row["payload"]
 
             try:
+                # Re-validate URL at delivery time (DNS may have changed since registration)
+                if not _is_safe_url(row["url"]):
+                    raise ValueError("Webhook URL points to a private/internal address")
                 headers = {"Content-Type": "application/json", "X-MoltGrid-Event": row["event_type"]}
                 if row["secret"]:
                     sig = _hmac.new(row["secret"].encode(), body.encode(), hashlib.sha256).hexdigest()
@@ -5605,9 +5672,14 @@ def admin_login(req: AdminLoginRequest, response: Response):
     """Authenticate admin and set session cookie."""
     if not ADMIN_PASSWORD_HASH:
         raise HTTPException(503, "Admin not configured. Set ADMIN_PASSWORD_HASH env var.")
-    incoming_hash = hashlib.sha256(req.password.encode()).hexdigest()
-    if not _hmac.compare_digest(incoming_hash, ADMIN_PASSWORD_HASH):
-        raise HTTPException(401, "Invalid password")
+    # Support bcrypt hashes (start with $2) with SHA-256 fallback for backward compat
+    if ADMIN_PASSWORD_HASH.startswith("$2"):
+        if not _bcrypt.checkpw(req.password.encode(), ADMIN_PASSWORD_HASH.encode()):
+            raise HTTPException(401, "Invalid password")
+    else:
+        incoming_hash = hashlib.sha256(req.password.encode()).hexdigest()
+        if not _hmac.compare_digest(incoming_hash, ADMIN_PASSWORD_HASH):
+            raise HTTPException(401, "Invalid password")
     token = secrets.token_urlsafe(48)
     expires_at = time.time() + ADMIN_SESSION_TTL
     with get_db() as db:
@@ -5616,7 +5688,7 @@ def admin_login(req: AdminLoginRequest, response: Response):
         db.execute("INSERT INTO admin_sessions (token, expires_at) VALUES (?, ?)", (token, expires_at))
     response.set_cookie(
         key="admin_token", value=token, httponly=True,
-        max_age=ADMIN_SESSION_TTL, samesite="lax", path="/",
+        secure=True, max_age=ADMIN_SESSION_TTL, samesite="lax", path="/",
     )
     return {"status": "authenticated"}
 
