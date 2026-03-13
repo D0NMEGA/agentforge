@@ -158,8 +158,20 @@ app = FastAPI(
     version="0.9.0",
     lifespan=lifespan,
     docs_url="/api-docs",
-    redoc_url="/api-redoc",
+    redoc_url=None,
 )
+
+@app.get("/api-redoc", response_class=HTMLResponse, include_in_schema=False)
+def custom_redoc():
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><title>MoltGrid — ReDoc</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{margin:0;padding:0;}</style>
+</head><body>
+<redoc spec-url="https://api.moltgrid.net/openapi.json"
+  hide-hostname="false" theme='{"colors":{"primary":{"main":"#ff3333"}}}'></redoc>
+<script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+</body></html>''')
 
 
 def _http_code_to_slug(status: int) -> str:
