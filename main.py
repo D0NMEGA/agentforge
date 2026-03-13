@@ -159,6 +159,7 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url="/api-docs",
     redoc_url=None,
+    swagger_favicon_url="/public/favicon/favicon.ico",
 )
 
 @app.get("/api-redoc", response_class=HTMLResponse, include_in_schema=False)
@@ -166,6 +167,9 @@ def custom_redoc():
     return HTMLResponse(content='''<!DOCTYPE html>
 <html><head><title>MoltGrid — ReDoc</title>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" type="image/x-icon" href="/public/favicon/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/public/favicon/favicon-32x32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/public/favicon/apple-touch-icon.png">
 <style>body{margin:0;padding:0;}</style>
 </head><body>
 <redoc spec-url="https://api.moltgrid.net/openapi.json"
