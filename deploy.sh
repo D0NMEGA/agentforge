@@ -19,6 +19,9 @@ git reset --hard origin/main
 echo "[deploy] Restoring symlinks..."
 ln -sf /opt/moltgrid-internal/CLAUDE.md /opt/moltgrid/CLAUDE.md
 ln -sf /opt/moltgrid-internal/.planning /opt/moltgrid/.planning
+ln -sf /opt/moltgrid-web/dashboard.html /opt/moltgrid/dashboard.html
+ln -sf /opt/moltgrid-web/admin.html /opt/moltgrid/admin.html
+ln -sf /opt/moltgrid-web/admin_login.html /opt/moltgrid/admin_login.html
 
 echo "[deploy] Syncing skills from internal repo..."
 mkdir -p /opt/moltgrid/.claude/commands/moltgrid
