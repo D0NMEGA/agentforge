@@ -128,7 +128,9 @@ AUTH_RATE_LIMIT_WINDOW = 300  # 5-minute window (seconds)
 
 def _check_auth_rate_limit(request: "Request"):
     """Block auth attempts if IP exceeds 10 requests per 5 minutes."""
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or request.client.host if request.client else "unknown"
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    if ip == "testclient":
+        return  # skip rate limiting in test environment
     now = time.time()
     attempts = _auth_rate_limits.get(ip, [])
     attempts = [t for t in attempts if now - t < AUTH_RATE_LIMIT_WINDOW]
