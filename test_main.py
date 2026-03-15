@@ -2626,7 +2626,6 @@ class TestMemoryVisibilitySchema:
         conn = self._raw_db()
         assert _index_exists(conn, "idx_mal_agent"), "idx_mal_agent index must exist after init_db()"
         conn.close()
-        assert row is not None, "idx_mal_agent index must exist after init_db()"
 
     def test_init_db_is_idempotent(self):
         """Calling init_db() twice does not raise."""
