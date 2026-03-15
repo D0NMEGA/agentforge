@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 
 from db import get_db
 from helpers import get_agent_id, _is_safe_url, _run_webhook_delivery_tick
-from models import WebhookRegisterRequest, WebhookResponse
+from models import WebhookRegisterRequest, WebhookResponse, WebhookListResponse, WebhookDeleteResponse, WebhookTestResponse
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def webhook_register(req: WebhookRegisterRequest, agent_id: str = Depends(get_ag
         event_types=req.event_types, active=True, created_at=now
     )
 
-@router.get("/v1/webhooks", tags=["Webhooks"])
+@router.get("/v1/webhooks", tags=["Webhooks"], response_model=WebhookListResponse)
 def webhook_list(agent_id: str = Depends(get_agent_id)):
     """List your registered webhooks."""
     with get_db() as db:
@@ -56,7 +56,7 @@ def webhook_list(agent_id: str = Depends(get_agent_id)):
         "count": len(rows),
     }
 
-@router.delete("/v1/webhooks/{webhook_id}", tags=["Webhooks"])
+@router.delete("/v1/webhooks/{webhook_id}", tags=["Webhooks"], response_model=WebhookDeleteResponse)
 def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a webhook."""
     with get_db() as db:
@@ -68,7 +68,7 @@ def webhook_delete(webhook_id: str, agent_id: str = Depends(get_agent_id)):
     return {"status": "deleted", "webhook_id": webhook_id}
 
 
-@router.post("/v1/webhooks/{webhook_id}/test", tags=["Webhooks"])
+@router.post("/v1/webhooks/{webhook_id}/test", tags=["Webhooks"], response_model=WebhookTestResponse)
 def webhook_test(webhook_id: str, request: Request, agent_id: str = Depends(get_agent_id)):
     """Fire a test ping to the webhook URL to verify it is reachable."""
     now = datetime.now(timezone.utc).isoformat()

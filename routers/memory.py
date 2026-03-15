@@ -14,13 +14,14 @@ from helpers import (
 )
 from models import (
     MemorySetRequest, MemoryGetResponse, MemoryListResponse,
-    MemoryVisibilityRequest,
+    MemoryVisibilityRequest, MemoryCrossAgentReadResponse,
+    MemorySetResponse, MemoryDeleteResponse, MemoryVisibilityResponse,
 )
 
 router = APIRouter()
 
 
-@router.get("/v1/agents/{target_agent_id}/memory/{key}", tags=["Memory"])
+@router.get("/v1/agents/{target_agent_id}/memory/{key}", tags=["Memory"], response_model=MemoryCrossAgentReadResponse)
 def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -37,7 +38,7 @@ def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "def
     return {"key": d["key"], "value": d["value"], "namespace": d["namespace"], "visibility": d.get("visibility") or "private", "updated_at": d["updated_at"], "expires_at": d.get("expires_at")}
 
 
-@router.patch("/v1/memory/{key}/visibility", tags=["Memory"])
+@router.patch("/v1/memory/{key}/visibility", tags=["Memory"], response_model=MemoryVisibilityResponse)
 def memory_set_visibility(key: str, req: MemoryVisibilityRequest, agent_id: str = Depends(get_agent_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
@@ -50,7 +51,7 @@ def memory_set_visibility(key: str, req: MemoryVisibilityRequest, agent_id: str 
     return {"status": "updated", "key": key, "visibility": vis}
 
 
-@router.post("/v1/memory", tags=["Memory"])
+@router.post("/v1/memory", tags=["Memory"], response_model=MemorySetResponse)
 def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc)
     expires = None
@@ -85,7 +86,7 @@ def memory_get(key: str, namespace: str = "default", agent_id: str = Depends(get
     _log_memory_access("read", agent_id, namespace, key, actor_agent_id=agent_id)
     return MemoryGetResponse(**d)
 
-@router.delete("/v1/memory/{key}", tags=["Memory"])
+@router.delete("/v1/memory/{key}", tags=["Memory"], response_model=MemoryDeleteResponse)
 def memory_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         r = db.execute("DELETE FROM memory WHERE agent_id=? AND namespace=? AND key=?", (agent_id, namespace, key))
