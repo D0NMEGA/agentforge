@@ -200,5 +200,5 @@ def get_template(template_id: str):
     with get_db() as db:
         row = db.execute("SELECT template_id, name, description, category, starter_code FROM templates WHERE template_id = ?", (template_id,)).fetchone()
     if not row:
-        raise HTTPException(status_code=404, detail={"error": "Template not found", "code": "TEMPLATE_NOT_FOUND", "status": 404})
+        raise HTTPException(status_code=404, detail="Template not found")
     return {"template_id": row["template_id"], "name": row["name"], "description": row["description"], "category": row["category"], "starter_code": row["starter_code"]}

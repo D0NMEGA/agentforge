@@ -113,10 +113,7 @@ def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(
             "SELECT agent_id FROM agents WHERE moltbook_profile_id = ?", (req.moltbook_user_id,)
         ).fetchone()
     if existing:
-        raise HTTPException(
-            409,
-            detail={"error": "MoltBook user already registered", "code": "ALREADY_REGISTERED", "status": 409},
-        )
+        raise HTTPException(409, "MoltBook user already registered")
     agent_id = f"af_{uuid.uuid4().hex[:12]}"
     raw_key = f"af_{secrets.token_hex(24)}"
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()

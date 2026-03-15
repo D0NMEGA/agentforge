@@ -3848,7 +3848,7 @@ class TestStripeEmailConfirmation:
         with patch("stripe.Webhook.construct_event", return_value=mock_event):
             with patch("main._queue_email") as mock_email:
                 r2 = client.post(
-                    "/v1/stripe-webhook",
+                    "/v1/stripe/webhook",
                     content=b"{}",
                     headers={"stripe-signature": "t=1,v1=fake"}
                 )

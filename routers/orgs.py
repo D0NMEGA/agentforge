@@ -98,7 +98,7 @@ def invite_member(org_id: str, req: OrgInviteRequest, user_id: str = Depends(get
             (org_id, req.user_id),
         ).fetchone()
         if existing:
-            raise HTTPException(409, detail={"error": "Already a member", "code": "ALREADY_MEMBER", "status": 409})
+            raise HTTPException(409, "Already a member")
         db.execute(
             "INSERT INTO org_members (org_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
             (org_id, req.user_id, req.role, now),

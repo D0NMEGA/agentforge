@@ -292,7 +292,7 @@ def auth_2fa_setup(user_id: str = Depends(get_user_id)):
         if not row:
             raise HTTPException(404, "User not found")
         if row["totp_enabled"]:
-            raise HTTPException(400, detail={"error": "2FA already enabled", "code": "2FA_ALREADY_ENABLED", "status": 400})
+            raise HTTPException(400, "2FA already enabled")
         secret = pyotp.random_base32()
         uri = pyotp.totp.TOTP(secret).provisioning_uri(name=row["email"], issuer_name="MoltGrid")
         db.execute("UPDATE users SET totp_secret = ? WHERE user_id = ?", (secret, user_id))
@@ -306,9 +306,9 @@ def auth_2fa_verify(req: TOTP2FAVerifyRequest, user_id: str = Depends(get_user_i
             "SELECT totp_secret FROM users WHERE user_id = ?", (user_id,)
         ).fetchone()
         if not row or not row["totp_secret"]:
-            raise HTTPException(400, detail={"error": "2FA setup not initiated", "code": "2FA_NOT_SETUP", "status": 400})
+            raise HTTPException(400, "2FA setup not initiated")
         if not pyotp.TOTP(row["totp_secret"]).verify(req.code):
-            raise HTTPException(401, detail={"error": "Invalid TOTP code", "code": "INVALID_TOTP", "status": 401})
+            raise HTTPException(401, "Invalid TOTP code")
         plain_codes = [secrets.token_hex(8) for _ in range(10)]
         hashed_codes = [hashlib.sha256(c.encode()).hexdigest() for c in plain_codes]
         db.execute(
@@ -324,13 +324,13 @@ def auth_2fa_disable(req: TOTP2FADisableRequest, user_id: str = Depends(get_user
             "SELECT totp_secret, totp_enabled, totp_recovery_codes FROM users WHERE user_id = ?", (user_id,)
         ).fetchone()
         if not row or not row["totp_enabled"]:
-            raise HTTPException(400, detail={"error": "2FA not enabled", "code": "2FA_NOT_ENABLED", "status": 400})
+            raise HTTPException(400, "2FA not enabled")
         totp_valid = pyotp.TOTP(row["totp_secret"]).verify(req.code)
         if not totp_valid:
             code_hash = hashlib.sha256(req.code.encode()).hexdigest()
             recovery_codes = json.loads(row["totp_recovery_codes"] or "[]")
             if code_hash not in recovery_codes:
-                raise HTTPException(401, detail={"error": "Invalid code", "code": "INVALID_CODE", "status": 401})
+                raise HTTPException(401, "Invalid code")
         db.execute(
             "UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL WHERE user_id = ?",
             (user_id,)
