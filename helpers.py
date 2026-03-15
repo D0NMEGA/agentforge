@@ -184,39 +184,33 @@ def _check_usage_quota(db, agent_id: str):
         # Send 80% warning (only once)
         if 80 <= usage_pct < 81:
             _track_event("quota.warning_80pct", user_id=owner["user_id"], metadata={"tier": tier, "usage_pct": round(usage_pct, 1)})
-            warning_html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h1 style="color: #ff9800;">Warning: You're approaching your API limit</h1>
-                <p>Your MoltGrid usage is at <strong>{usage_pct:.1f}%</strong> of your monthly quota.</p>
-                <p><strong>Current usage:</strong> {owner["usage_count"]:,} / {limit:,} API calls</p>
-                <p><strong>Tier:</strong> {tier}</p>
-                <p>To avoid service interruption, consider upgrading your plan:</p>
-                <p><a href="https://moltgrid.net/dashboard#/billing" style="background: #007bff; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Upgrade Plan</a></p>
-            </body>
-            </html>
-            """
-            _queue_email(owner["email"], "You're approaching your API limit", warning_html)
+            warning_body = f'''
+<p style="color:#e4e4ef;">Your MoltGrid usage is at <strong>{usage_pct:.1f}%</strong> of your monthly quota.</p>
+<p style="color:#e4e4ef;"><strong>Current usage:</strong> {owner["usage_count"]:,} / {limit:,} API calls</p>
+<p style="color:#e4e4ef;"><strong>Tier:</strong> {tier}</p>
+<p style="color:#e4e4ef;">To avoid service interruption, consider upgrading your plan:</p>
+<p style="margin-top:20px;">
+<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Plan</a>
+</p>
+'''
+            _queue_email(owner["email"], "You're approaching your API limit", _branded_email("Approaching your API limit", warning_body))
 
     if limit is not None and owner["usage_count"] >= limit:
         # Send quota exceeded email (only once when hitting limit)
         if owner["usage_count"] == limit and _should_send_notification(db, owner["user_id"], "quota_alerts"):
-            exceeded_html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h1 style="color: #dc3545;">API limit reached -- your agents may be affected</h1>
-                <p>You've reached your monthly API call quota for the <strong>{tier}</strong> tier.</p>
-                <p><strong>Limit:</strong> {limit:,} API calls per month</p>
-                <p>Your agents will receive 429 errors until:</p>
-                <ul>
-                    <li>Your quota resets at the start of next month, OR</li>
-                    <li>You upgrade to a higher tier</li>
-                </ul>
-                <p><a href="https://moltgrid.net/dashboard#/billing" style="background: #dc3545; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">Upgrade Now</a></p>
-            </body>
-            </html>
-            """
-            _queue_email(owner["email"], "API limit reached -- your agents may be affected", exceeded_html)
+            exceeded_body = f'''
+<p style="color:#e4e4ef;">You've reached your monthly API call quota for the <strong>{tier}</strong> tier.</p>
+<p style="color:#e4e4ef;"><strong>Limit:</strong> {limit:,} API calls per month</p>
+<p style="color:#e4e4ef;">Your agents will receive 429 errors until:</p>
+<ul style="color:#e4e4ef;padding-left:20px;">
+<li style="margin-bottom:8px;">Your quota resets at the start of next month, OR</li>
+<li style="margin-bottom:8px;">You upgrade to a higher tier</li>
+</ul>
+<p style="margin-top:20px;">
+<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Now</a>
+</p>
+'''
+            _queue_email(owner["email"], "API limit reached -- your agents may be affected", _branded_email("API limit reached", exceeded_body))
         _track_event("quota.exceeded", user_id=owner["user_id"], metadata={"tier": tier, "limit": limit})
         raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
 
@@ -514,14 +508,14 @@ def _branded_email(title: str, body_content: str) -> str:
 <table width="100%" cellpadding="0" cellspacing="0">
 <tr><td style="color:#7a7a92;font-size:12px;">
 <a href="https://moltgrid.net" style="color:#ff3333;text-decoration:none;">moltgrid.net</a> &nbsp;&middot;&nbsp;
-<a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">Docs</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">Docs</a> &nbsp;&middot;&nbsp;
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a> &nbsp;&middot;&nbsp;
-<a href="https://api.moltgrid.net/dashboard" style="color:#ff3333;text-decoration:none;">Dashboard</a>
+<a href="https://moltgrid.net/dashboard" style="color:#ff3333;text-decoration:none;">Dashboard</a>
 </td></tr>
 <tr><td style="color:#7a7a92;font-size:11px;padding-top:12px;">
 MoltGrid &mdash; Infrastructure for Autonomous Agents<br>
-<a href="https://api.moltgrid.net/privacy" style="color:#7a7a92;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp;
-<a href="https://api.moltgrid.net/terms" style="color:#7a7a92;text-decoration:none;">Terms of Service</a>
+<a href="https://moltgrid.net/privacy" style="color:#7a7a92;text-decoration:none;">Privacy Policy</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/terms" style="color:#7a7a92;text-decoration:none;">Terms of Service</a>
 </td></tr>
 </table>
 </td></tr>

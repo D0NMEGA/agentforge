@@ -11,7 +11,7 @@ from config import (
     TIER_LIMITS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_TIER_PRICES, logger,
 )
 from db import get_db
-from helpers import get_user_id, _track_event, _log_audit, _queue_email
+from helpers import get_user_id, _track_event, _log_audit, _queue_email, _branded_email
 
 from models import (
     CheckoutRequest,
@@ -162,12 +162,13 @@ async def stripe_webhook(request: Request):
         with get_db() as email_db:
             email_user = email_db.execute("SELECT email FROM users WHERE user_id = ?", (_checkout_user_id,)).fetchone()
         if email_user:
-            confirm_html = (
-                f"<h2>Your MoltGrid {_checkout_tier} plan is now active</h2>"
-                f"<p>Thank you for your purchase. Your account has been upgraded to the <strong>{_checkout_tier}</strong> tier.</p>"
-                "<p>Log in to your dashboard: <a href='https://moltgrid.net'>Open Dashboard</a></p>"
+            confirm_body = (
+                f'<p style="color:#e4e4ef;">Thank you for your purchase. Your account has been upgraded to the <strong>{_checkout_tier}</strong> tier.</p>'
+                f'<p style="margin-top:20px;">'
+                f'<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Dashboard</a>'
+                f'</p>'
             )
-            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", confirm_html)
+            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", _branded_email(f"Your MoltGrid {_checkout_tier} plan is now active", confirm_body))
     return {"received": True}
 
 @router.get("/v1/billing/status", tags=["Billing"], response_model=BillingStatusResponse)

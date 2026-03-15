@@ -93,10 +93,10 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
 <li style="margin-bottom:8px;"><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
 </ol>
 <p style="margin-top:20px;">
-<a href="https://api.moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
 </p>
 <p style="color:#7a7a92;font-size:13px;margin-top:16px;">
-<a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">View Full Documentation</a> &nbsp;&middot;&nbsp;
+<a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">View Full Documentation</a> &nbsp;&middot;&nbsp;
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a>
 </p>
 '''
@@ -175,12 +175,12 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
         if user_ip_row:
             known_ips = json.loads(user_ip_row["known_login_ips"] or "[]")
             if known_ips and client_ip not in known_ips:
-                alert_html = (
-                    f"<p>A login to your MoltGrid account was detected from a new IP address: "
-                    f"<strong>{client_ip}</strong>.</p>"
-                    f"<p>If this was not you, please rotate your API keys immediately.</p>"
+                alert_body = (
+                    f'<p style="color:#e4e4ef;">A login to your MoltGrid account was detected from a new IP address: '
+                    f'<strong>{client_ip}</strong>.</p>'
+                    f'<p style="color:#e4e4ef;">If this was not you, please rotate your API keys immediately.</p>'
                 )
-                _get_queue_email()(user_ip_row["email"], "MoltGrid security alert: new login IP detected", alert_html)
+                _get_queue_email()(user_ip_row["email"], "MoltGrid security alert: new login IP detected", _branded_email("New login detected", alert_body))
             if client_ip not in known_ips:
                 known_ips.append(client_ip)
                 known_ips = known_ips[-10:]
@@ -269,16 +269,15 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
             "INSERT INTO password_resets (token, user_id, expires_at) VALUES (?, ?, ?) ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, expires_at = EXCLUDED.expires_at",
             (reset_token, user_row["user_id"], expires.isoformat())
         )
-    reset_url = f"https://api.moltgrid.net/dashboard#/reset-password?token={reset_token}"
-    reset_html = f"""
-    <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-    <h1 style="color:#333">Reset your MoltGrid password</h1>
-    <p>Click the link below to reset your password. This link expires in 1 hour.</p>
-    <p><a href="{reset_url}" style="background:#ff3333;color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block">Reset Password</a></p>
-    <p style="color:#666;font-size:0.85rem">If you didn't request this, ignore this email.</p>
-    </body></html>
-    """
-    _get_queue_email()(user_row["email"], "Reset your MoltGrid password", reset_html)
+    reset_url = f"https://moltgrid.net/dashboard#/reset-password?token={reset_token}"
+    reset_body = f'''
+<p style="color:#e4e4ef;">Click the button below to reset your password. This link expires in 1 hour.</p>
+<p style="margin-top:20px;">
+<a href="{reset_url}" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Reset Password</a>
+</p>
+<p style="color:#7a7a92;font-size:13px;margin-top:16px;">If you didn't request this, you can safely ignore this email.</p>
+'''
+    _get_queue_email()(user_row["email"], "Reset your MoltGrid password", _branded_email("Reset your password", reset_body))
     return {"message": "If that email is registered, a reset link has been sent."}
 
 @router.post("/v1/auth/reset-password", response_model=MessageResponse, tags=["Auth"])
@@ -408,7 +407,7 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
         _get_queue_email()(
             owner_row["email"],
             "MoltGrid security alert: API key rotated",
-            "<p>Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>"
+            _branded_email("API key rotated", '<p style="color:#e4e4ef;">Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>')
         )
     _log_audit("apikey.rotate", agent_id=agent_id)
     return {
@@ -517,25 +516,22 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
 
     # Queue first-agent email OUTSIDE get_db() block to avoid nested lock
     if _send_first_agent_email and _first_agent_email_to:
-        first_agent_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #333;">Your first agent is live on MoltGrid!</h1>
-            <p>Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
-            <p><strong>Agent ID:</strong> <code>{agent_id}</code></p>
-            <p><strong>Next steps:</strong></p>
-            <ul>
-                <li>Store persistent memory: <code>POST /v1/memory</code></li>
-                <li>Send a message to another agent: <code>POST /v1/relay/send</code></li>
-                <li>Submit a background job: <code>POST /v1/queue/submit</code></li>
-                <li>Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
-            </ul>
-            <p><a href="https://moltgrid.net/dashboard" style="background: #28a745; color: white; padding: 12px 24px; text-decoration: none; border-radius: 4px; display: inline-block;">View Dashboard</a></p>
-            <p>Your agent is ready to go. Start building!</p>
-        </body>
-        </html>
-        """
-        _get_queue_email()(_first_agent_email_to, "Your first agent is live on MoltGrid", first_agent_html)
+        first_agent_body = f'''
+<p style="color:#e4e4ef;">Congratulations! Your agent <strong>{req.name or agent_id}</strong> is now registered.</p>
+<p style="color:#e4e4ef;"><strong>Agent ID:</strong> <code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;">{agent_id}</code></p>
+<p style="color:#e4e4ef;"><strong>Next steps:</strong></p>
+<ul style="color:#e4e4ef;padding-left:20px;">
+<li style="margin-bottom:8px;">Store persistent memory: <code>POST /v1/memory</code></li>
+<li style="margin-bottom:8px;">Send a message to another agent: <code>POST /v1/relay/send</code></li>
+<li style="margin-bottom:8px;">Submit a background job: <code>POST /v1/queue/submit</code></li>
+<li style="margin-bottom:8px;">Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
+</ul>
+<p style="margin-top:20px;">
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Dashboard</a>
+</p>
+<p style="color:#e4e4ef;">Your agent is ready to go. Start building!</p>
+'''
+        _get_queue_email()(_first_agent_email_to, "Your first agent is live on MoltGrid", _branded_email("Your first agent is live!", first_agent_body))
 
     _track_event("agent.registered", agent_id=agent_id)
     _log_audit("agent.register", user_id=owner_id, agent_id=agent_id)
