@@ -18,8 +18,27 @@ os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
 
 from fastapi.testclient import TestClient
 from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick, _run_liveness_check, _run_webhook_delivery_tick
+import db as db_module
 
 client = TestClient(app)
+
+_DB_BACKEND = os.getenv("DB_BACKEND", "sqlite")
+
+# Initialize PG pool once at module level if needed
+if _DB_BACKEND in ("postgres", "dual"):
+    db_module.init_pool()
+
+
+def _truncate_all_pg_tables():
+    """Truncate all tables in PostgreSQL for a fresh test state."""
+    with db_module.get_db() as conn:
+        # Get all user tables
+        rows = conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        ).fetchall()
+        table_names = [r[0] if isinstance(r, tuple) else r["tablename"] for r in rows]
+        if table_names:
+            conn.execute("TRUNCATE %s CASCADE" % ", ".join(table_names))
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -27,13 +46,18 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def fresh_db():
     """Wipe and re-init the DB before every test."""
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-    init_db()
+    if _DB_BACKEND in ("postgres", "dual"):
+        _truncate_all_pg_tables()
+        init_db()  # Re-seed templates etc.
+    else:
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
+        init_db()
     _ws_connections.clear()
     yield
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+    if _DB_BACKEND == "sqlite":
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
 
 
 _test_agent_counter = 0
