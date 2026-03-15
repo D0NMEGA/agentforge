@@ -28,7 +28,7 @@ jobs:
         with:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/D0NMEGA/MoltGrid/blob/main/CLA.md"
-          branch: "main"
+          branch: "cla-signatures"
           allowlist: D0NMEGA,dependabot[bot]
           custom-notsigned-prcomment: |
             Thank you for your contribution! Before we can merge this PR, you need to sign our [Contributor License Agreement](https://github.com/D0NMEGA/MoltGrid/blob/main/CLA.md).
