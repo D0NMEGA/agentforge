@@ -235,9 +235,16 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
     """Delete an owned agent and all its data."""
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
-        for tbl in ["memory", "queue", "webhooks", "scheduled_tasks", "shared_memory",
-                     "rate_limits", "vector_memory", "memory_access_log"]:
-            db.execute(f"DELETE FROM {tbl} WHERE agent_id=?", (agent_id,))
+        for tbl in ["memory", "queue", "webhooks", "scheduled_tasks",
+                     "rate_limits", "vector_memory", "memory_access_log",
+                     "sessions", "pubsub_subscriptions", "integrations",
+                     "agent_events", "dead_letter", "webhook_deliveries"]:
+            try:
+                db.execute(f"DELETE FROM {tbl} WHERE agent_id=?", (agent_id,))
+            except Exception:
+                pass  # table may not exist or lack agent_id column
+        # shared_memory uses owner_agent, not agent_id
+        db.execute("DELETE FROM shared_memory WHERE owner_agent=?", (agent_id,))
         db.execute("DELETE FROM relay WHERE from_agent=? OR to_agent=?", (agent_id, agent_id))
         db.execute("DELETE FROM collaborations WHERE agent_id=? OR partner_agent=?", (agent_id, agent_id))
         db.execute("DELETE FROM marketplace WHERE creator_agent=?", (agent_id,))
