@@ -18,18 +18,22 @@ RATE_LIMIT_WINDOW = 60  # seconds
 RATE_LIMIT_MAX = 120  # requests per window per agent (fallback / free-tier default)
 TIER_RATE_LIMITS = {
     "free":  120,
-    "hobby": 300,
-    "team":  600,
-    "scale": 1200,
+    "pro":   1200,
 }
 
 # Subscription tier limits
 TIER_LIMITS = {
-    "free":  {"max_agents": 1,   "max_api_calls": 10_000},
-    "hobby": {"max_agents": 10,  "max_api_calls": 1_000_000},
-    "team":  {"max_agents": 50,  "max_api_calls": 10_000_000},
-    "scale": {"max_agents": 200, "max_api_calls": None},  # unlimited
+    "free":  {"max_agents": 3,    "max_api_calls": 10_000},
+    "pro":   {"max_agents": 200,  "max_api_calls": None},  # unlimited
 }
+
+# Backward compatibility — existing users on old tiers get mapped to pro
+TIER_RATE_LIMITS["hobby"] = TIER_RATE_LIMITS["pro"]
+TIER_RATE_LIMITS["team"] = TIER_RATE_LIMITS["pro"]
+TIER_RATE_LIMITS["scale"] = TIER_RATE_LIMITS["pro"]
+TIER_LIMITS["hobby"] = TIER_LIMITS["pro"]
+TIER_LIMITS["team"] = TIER_LIMITS["pro"]
+TIER_LIMITS["scale"] = TIER_LIMITS["pro"]
 
 # Admin auth: load password hash from env (set on VPS only, never in code)
 ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
