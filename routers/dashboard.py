@@ -27,13 +27,13 @@ from models import (
 # Import webhook validation
 from helpers import _is_safe_url
 
-router = APIRouter()
+router = APIRouter(tags=["Dashboard"])
 
 # Webhook event types (shared constant)
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 
 
-@router.get("/v1/user/overview", tags=["User Dashboard"])
+@router.get("/v1/user/overview", tags=["Dashboard"])
 def user_overview(user_id: str = Depends(get_user_id)):
     """Aggregated account overview: agents, totals, and 30-day charts."""
     import json as _json
@@ -97,7 +97,7 @@ def user_overview(user_id: str = Depends(get_user_id)):
     }
 
 
-@router.get("/v1/user/agents", tags=["User Dashboard"])
+@router.get("/v1/user/agents", tags=["Dashboard"])
 def user_list_agents(user_id: str = Depends(get_user_id)):
     """List all agents owned by this user."""
     with get_db() as db:
@@ -109,7 +109,7 @@ def user_list_agents(user_id: str = Depends(get_user_id)):
     return {"agents": [dict(r) for r in rows], "count": len(rows)}
 
 
-@router.get("/v1/user/agents/{agent_id}/activity", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/activity", tags=["Dashboard"])
 def user_agent_activity(
     agent_id: str,
     user_id: str = Depends(get_user_id),
@@ -175,7 +175,7 @@ def user_agent_activity(
     return {"agent_id": agent_id, "events": events, "total": total}
 
 
-@router.get("/v1/user/agents/{agent_id}/stats", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/stats", tags=["Dashboard"])
 def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
     """Get aggregate stats for one owned agent."""
     with get_db() as db:
@@ -198,7 +198,7 @@ def user_agent_stats(agent_id: str, user_id: str = Depends(get_user_id)):
     }
 
 
-@router.patch("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
+@router.patch("/v1/user/agents/{agent_id}", tags=["Dashboard"])
 def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user_id)):
     """Rename an owned agent."""
     import re
@@ -214,7 +214,7 @@ def user_rename_agent(agent_id: str, body: dict, user_id: str = Depends(get_user
     return {"status": "renamed", "agent_id": agent_id, "name": name}
 
 
-@router.post("/v1/user/agents/{agent_id}/rotate-key", tags=["User Dashboard"])
+@router.post("/v1/user/agents/{agent_id}/rotate-key", tags=["Dashboard"])
 def user_rotate_key(agent_id: str, user_id: str = Depends(get_user_id)):
     """Rotate API key for an owned agent."""
     from helpers import hash_key, generate_api_key
@@ -230,7 +230,7 @@ def user_rotate_key(agent_id: str, user_id: str = Depends(get_user_id)):
     }
 
 
-@router.delete("/v1/user/agents/{agent_id}", tags=["User Dashboard"])
+@router.delete("/v1/user/agents/{agent_id}", tags=["Dashboard"])
 def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
     """Delete an owned agent and all its data."""
     with get_db() as db:
@@ -246,7 +246,7 @@ def user_delete_agent(agent_id: str, user_id: str = Depends(get_user_id)):
     return {"status": "deleted", "agent_id": agent_id}
 
 
-@router.get("/v1/user/usage", tags=["User Dashboard"])
+@router.get("/v1/user/usage", tags=["Dashboard"])
 def user_usage(user_id: str = Depends(get_user_id)):
     """Aggregate usage stats for the current billing period."""
     now = datetime.now(timezone.utc)
@@ -276,7 +276,7 @@ def user_usage(user_id: str = Depends(get_user_id)):
             "period_end": period_end, "tier": tier, "limits": limits}
 
 
-@router.get("/v1/user/billing", tags=["User Dashboard"])
+@router.get("/v1/user/billing", tags=["Dashboard"])
 def user_billing(user_id: str = Depends(get_user_id)):
     """Subscription and billing info."""
     with get_db() as db:
@@ -295,7 +295,7 @@ def user_billing(user_id: str = Depends(get_user_id)):
             "next_billing_date": next_billing}
 
 
-@router.post("/v1/user/agents/{agent_id}/transfer", tags=["User Dashboard"])
+@router.post("/v1/user/agents/{agent_id}/transfer", tags=["Dashboard"])
 def user_transfer_agent(agent_id: str, req: TransferRequest, user_id: str = Depends(get_user_id)):
     """Transfer agent ownership to another user by email."""
     with get_db() as db:
@@ -314,7 +314,7 @@ def user_transfer_agent(agent_id: str, req: TransferRequest, user_id: str = Depe
     return {"agent_id": agent_id, "transferred_to": req.to_email.lower(), "message": "Transfer complete"}
 
 
-@router.delete("/v1/user/account", tags=["User Dashboard"])
+@router.delete("/v1/user/account", tags=["Dashboard"])
 def user_delete_account(user_id: str = Depends(get_user_id)):
     """Soft-delete user account."""
     with get_db() as db:
@@ -323,7 +323,7 @@ def user_delete_account(user_id: str = Depends(get_user_id)):
     return {"user_id": user_id, "message": "Account deactivated. Agents unlinked."}
 
 
-@router.post("/v1/user/account/hard-delete", tags=["User Dashboard"])
+@router.post("/v1/user/account/hard-delete", tags=["Dashboard"])
 def user_hard_delete_account(user_id: str = Depends(get_user_id)):
     """GDPR right to erasure."""
     with get_db() as db:
@@ -342,7 +342,7 @@ def user_hard_delete_account(user_id: str = Depends(get_user_id)):
     return {"status": "deleted", "message": "All data permanently erased per GDPR Article 17."}
 
 
-@router.get("/v1/user/data-export", tags=["User Dashboard"])
+@router.get("/v1/user/data-export", tags=["Dashboard"])
 def user_data_export(user_id: str = Depends(get_user_id)):
     """GDPR right to data portability."""
     with get_db() as db:
@@ -364,7 +364,7 @@ def user_data_export(user_id: str = Depends(get_user_id)):
     return export
 
 
-@router.get("/v1/user/agents/{agent_id}/messages-list", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/messages-list", tags=["Dashboard"])
 def user_messages_list(agent_id: str, offset: int = 0, limit: int = 20, direction: str = "all", search: str = "", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
@@ -387,7 +387,7 @@ def user_messages_list(agent_id: str, offset: int = 0, limit: int = 20, directio
     return {"messages": result, "total": total, "offset": offset, "limit": limit}
 
 
-@router.get("/v1/user/agents/{agent_id}/messages/{message_id}", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/messages/{message_id}", tags=["Dashboard"])
 def user_message_detail(agent_id: str, message_id: str, user_id: str = Depends(get_user_id)):
     """Get full detail for a single relay message."""
     with get_db() as db:
@@ -403,7 +403,7 @@ def user_message_detail(agent_id: str, message_id: str, user_id: str = Depends(g
     return d
 
 
-@router.get("/v1/user/agents/{agent_id}/memory-list", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/memory-list", tags=["Dashboard"])
 def user_memory_list(agent_id: str, offset: int = 0, limit: int = 30, namespace: str = "", search: str = "", visibility: str = "", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
@@ -418,7 +418,7 @@ def user_memory_list(agent_id: str, offset: int = 0, limit: int = 30, namespace:
     return {"keys": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit, "namespaces": [r["namespace"] for r in ns_rows]}
 
 
-@router.get("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/memory-entry", tags=["Dashboard"])
 def user_memory_get(agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     """Fetch a single memory entry including its value and visibility metadata."""
     if not key: raise HTTPException(400, "key is required")
@@ -431,7 +431,7 @@ def user_memory_get(agent_id: str, namespace: str = "default", key: str = "", us
     return d
 
 
-@router.patch("/v1/user/agents/{agent_id}/memory-entry/visibility", tags=["User Dashboard"])
+@router.patch("/v1/user/agents/{agent_id}/memory-entry/visibility", tags=["Dashboard"])
 def user_memory_set_visibility(agent_id: str, req: MemoryVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
@@ -444,7 +444,7 @@ def user_memory_set_visibility(agent_id: str, req: MemoryVisibilityRequest, user
     return {"status": "updated", "key": req.key, "namespace": req.namespace, "visibility": vis}
 
 
-@router.post("/v1/user/agents/{agent_id}/memory-bulk-visibility", tags=["User Dashboard"])
+@router.post("/v1/user/agents/{agent_id}/memory-bulk-visibility", tags=["Dashboard"])
 def user_memory_bulk_visibility(agent_id: str, req: MemoryBulkVisibilityRequest, user_id: str = Depends(get_user_id)):
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
@@ -463,7 +463,7 @@ def user_memory_bulk_visibility(agent_id: str, req: MemoryBulkVisibilityRequest,
     return {"status": "updated", "count": updated, "visibility": vis}
 
 
-@router.get("/v1/user/agents/{agent_id}/memory-access-log", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/memory-access-log", tags=["Dashboard"])
 def user_memory_access_log(agent_id: str, namespace: str = "", key: str = "", offset: int = 0, limit: int = 50, user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
@@ -476,7 +476,7 @@ def user_memory_access_log(agent_id: str, namespace: str = "", key: str = "", of
     return {"logs": [dict(r) for r in rows], "total": total, "offset": offset}
 
 
-@router.delete("/v1/user/agents/{agent_id}/memory-entry", tags=["User Dashboard"])
+@router.delete("/v1/user/agents/{agent_id}/memory-entry", tags=["Dashboard"])
 def user_memory_delete(agent_id: str, namespace: str = "default", key: str = "", user_id: str = Depends(get_user_id)):
     if not key: raise HTTPException(400, "key is required")
     with get_db() as db:
@@ -487,7 +487,7 @@ def user_memory_delete(agent_id: str, namespace: str = "default", key: str = "",
     return {"status": "deleted"}
 
 
-@router.get("/v1/user/agents/{agent_id}/integrations", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/integrations", tags=["Dashboard"])
 def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
     """List platform integrations for an owned agent (dashboard)."""
     with get_db() as db:
@@ -503,7 +503,7 @@ def user_integration_list(agent_id: str, user_id: str = Depends(get_user_id)):
     return {"agent_id": agent_id, "integrations": integrations}
 
 
-@router.get("/v1/user/integrations/status", response_model=IntegrationStatusResponse, tags=["User Dashboard"])
+@router.get("/v1/user/integrations/status", response_model=IntegrationStatusResponse, tags=["Dashboard"])
 def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depends(get_user_id)):
     """Return integration status with event counts."""
     with get_db() as db:
@@ -519,7 +519,7 @@ def user_integrations_status(agent_id: Optional[str] = None, user_id: str = Depe
     return IntegrationStatusResponse(integrations=items)
 
 
-@router.get("/v1/user/agents/{agent_id}/jobs-list", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/jobs-list", tags=["Dashboard"])
 def user_jobs_list(agent_id: str, offset: int = 0, limit: int = 20, status: str = "all", user_id: str = Depends(get_user_id)):
     limit = max(1, min(limit, 100)); offset = max(0, offset)
     with get_db() as db:
@@ -531,7 +531,7 @@ def user_jobs_list(agent_id: str, offset: int = 0, limit: int = 20, status: str 
     return {"jobs": [dict(r) for r in rows], "total": total, "offset": offset, "limit": limit}
 
 
-@router.get("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/schedules", tags=["Dashboard"])
 def user_schedules_list(agent_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -539,7 +539,7 @@ def user_schedules_list(agent_id: str, user_id: str = Depends(get_user_id)):
     return {"schedules": [dict(r) for r in rows]}
 
 
-@router.post("/v1/user/agents/{agent_id}/schedules", tags=["User Dashboard"])
+@router.post("/v1/user/agents/{agent_id}/schedules", tags=["Dashboard"])
 def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str = Depends(get_user_id)):
     try:
         cron = croniter(req.cron_expr, datetime.now(timezone.utc)); next_run = cron.get_next(datetime).isoformat()
@@ -553,7 +553,7 @@ def user_schedule_create(agent_id: str, req: UserScheduleRequest, user_id: str =
     return {"task_id": task_id, "cron_expr": req.cron_expr, "next_run_at": next_run, "enabled": True}
 
 
-@router.patch("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
+@router.patch("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["Dashboard"])
 def user_schedule_update(agent_id: str, task_id: str, req: UserScheduleUpdateRequest, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -574,7 +574,7 @@ def user_schedule_update(agent_id: str, task_id: str, req: UserScheduleUpdateReq
     return dict(row)
 
 
-@router.delete("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["User Dashboard"])
+@router.delete("/v1/user/agents/{agent_id}/schedules/{task_id}", tags=["Dashboard"])
 def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -584,7 +584,7 @@ def user_schedule_delete(agent_id: str, task_id: str, user_id: str = Depends(get
     return {"status": "deleted"}
 
 
-@router.get("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
+@router.get("/v1/user/agents/{agent_id}/webhooks", tags=["Dashboard"])
 def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -592,7 +592,7 @@ def user_webhooks_list(agent_id: str, user_id: str = Depends(get_user_id)):
     return {"webhooks": [dict(r) for r in rows]}
 
 
-@router.post("/v1/user/agents/{agent_id}/webhooks", tags=["User Dashboard"])
+@router.post("/v1/user/agents/{agent_id}/webhooks", tags=["Dashboard"])
 def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str = Depends(get_user_id)):
     if not _is_safe_url(req.url): raise HTTPException(400, "Webhook URL points to a private/internal address")
     for et in req.event_types:
@@ -605,7 +605,7 @@ def user_webhook_create(agent_id: str, req: WebhookRegisterRequest, user_id: str
     return {"webhook_id": webhook_id, "url": req.url, "event_types": req.event_types, "active": True}
 
 
-@router.delete("/v1/user/agents/{agent_id}/webhooks/{webhook_id}", tags=["User Dashboard"])
+@router.delete("/v1/user/agents/{agent_id}/webhooks/{webhook_id}", tags=["Dashboard"])
 def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         _verify_agent_ownership(db, agent_id, user_id)
@@ -615,7 +615,7 @@ def user_webhook_delete(agent_id: str, webhook_id: str, user_id: str = Depends(g
     return {"status": "deleted"}
 
 
-@router.get("/v1/user/audit-log/export", tags=["User Dashboard"])
+@router.get("/v1/user/audit-log/export", tags=["Dashboard"])
 def user_audit_log_export(action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, user_id: str = Depends(get_user_id)):
     """Export audit log entries as CSV."""
     base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"
@@ -633,7 +633,7 @@ def user_audit_log_export(action: Optional[str] = None, from_date: Optional[str]
     return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=audit-log.csv"})
 
 
-@router.get("/v1/user/audit-log", tags=["User Dashboard"])
+@router.get("/v1/user/audit-log", tags=["Dashboard"])
 def user_audit_log(action: Optional[str] = None, from_date: Optional[str] = None, to_date: Optional[str] = None, limit: int = 50, offset: int = 0, user_id: str = Depends(get_user_id)):
     """Retrieve audit log entries for the authenticated user."""
     base = "SELECT log_id, action, agent_id, details, ip_address, created_at FROM audit_logs WHERE user_id = ?"

@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.responses import JSONResponse
 
@@ -69,80 +70,112 @@ async def lifespan(app):
 tags_metadata = [
     {
         "name": "Admin",
-        "description": "Admin routes (20 routes)."
+        "description": "Admin panel, analytics, and system management endpoints. Requires admin session cookie."
     },
     {
         "name": "Auth",
-        "description": "Auth + User notification routes (14 routes)."
+        "description": "User authentication, JWT management, 2FA setup, and password reset."
     },
     {
         "name": "Billing",
-        "description": "Billing + Templates routes (7 routes)."
+        "description": "Subscription management, Stripe checkout, billing portal, and pricing tiers."
     },
     {
-        "name": "User Dashboard",
-        "description": "User Dashboard routes (33 routes)."
+        "name": "Dashboard",
+        "description": "Serves the agent dashboard web UI."
     },
     {
         "name": "Directory",
-        "description": "Directory routes (13 routes)."
-    },
-    {
-        "name": "Events",
-        "description": "Events routes (4 routes)."
-    },
-    {
-        "name": "Integrations",
-        "description": "Integrations + Onboarding routes (10 routes)."
-    },
-    {
-        "name": "Marketplace",
-        "description": "Marketplace + Testing routes (10 routes)."
-    },
-    {
-        "name": "Memory",
-        "description": "Memory routes (6 routes)."
-    },
-    {
-        "name": "Orgs",
-        "description": "Orgs routes (8 routes)."
-    },
-    {
-        "name": "Pub/Sub",
-        "description": "Pub/Sub routes (5 routes)."
-    },
-    {
-        "name": "Queue",
-        "description": "Queue routes (8 routes)."
-    },
-    {
-        "name": "Relay",
-        "description": "Relay routes (4 routes)."
-    },
-    {
-        "name": "Schedules",
-        "description": "Schedules routes (5 routes)."
-    },
-    {
-        "name": "Sessions",
-        "description": "Sessions routes (6 routes)."
+        "description": "Public agent registry, discovery, search, matchmaking, and collaboration tracking."
     },
     {
         "name": "Documentation",
-        "description": "System + Documentation + Obstacle Course routes (~21 routes)."
+        "description": "Serves documentation pages and platform guides."
     },
     {
-        "name": "tiered-memory",
-        "description": "Tiered Memory routes (3 routes) -- composition layer over sessions, memory, and vector_memory."
+        "name": "Events",
+        "description": "Structured event tracking and analytics ingestion for agent activity."
+    },
+    {
+        "name": "Integrations",
+        "description": "Platform integrations and MoltBook deep-link event ingestion."
+    },
+    {
+        "name": "Marketplace",
+        "description": "Post, claim, deliver, and review tasks between agents with a credit-reward system."
+    },
+    {
+        "name": "Memory",
+        "description": "Key-value memory with visibility controls, namespaces, and TTL expiry."
+    },
+    {
+        "name": "Obstacle Course",
+        "description": "Multi-stage API challenge for testing agent capabilities. Submit results and view the leaderboard."
+    },
+    {
+        "name": "Onboarding",
+        "description": "Step-by-step onboarding checklist with credit rewards for completing all MoltGrid features."
+    },
+    {
+        "name": "Orgs",
+        "description": "Organisation and team management for grouping agents under shared workspaces."
+    },
+    {
+        "name": "Pub/Sub",
+        "description": "Topic-based publish/subscribe messaging for broadcasting events across agents."
+    },
+    {
+        "name": "Queue",
+        "description": "Background job queue with retry, priority, dead-letter support, and result retrieval."
+    },
+    {
+        "name": "Relay",
+        "description": "Point-to-point agent messaging with inbox, broadcast, and real-time WebSocket relay."
+    },
+    {
+        "name": "Schedules",
+        "description": "Cron-based recurring job scheduling with enable/disable controls."
+    },
+    {
+        "name": "Sessions",
+        "description": "Conversation context management with token tracking and auto-summarisation."
+    },
+    {
+        "name": "Shared Memory",
+        "description": "Namespace-scoped shared key-value store accessible across multiple agents."
+    },
+    {
+        "name": "System",
+        "description": "Health checks, SLA/uptime status, usage stats, and root service information."
+    },
+    {
+        "name": "Templates",
+        "description": "Pre-built agent starter templates with code scaffolding for common use cases."
+    },
+    {
+        "name": "Testing",
+        "description": "Coordination pattern simulation framework for testing multi-agent scenarios."
+    },
+    {
+        "name": "Text Utilities",
+        "description": "Server-side text processing: word count, URL/email extraction, hashing, and encoding."
+    },
+    {
+        "name": "Tiered Memory",
+        "description": "Unified memory abstraction spanning session (Tier 1), notes (Tier 2), and vector long-term (Tier 3) stores."
+    },
+    {
+        "name": "User",
+        "description": "User-level notification preferences and account settings."
     },
     {
         "name": "Vector Memory",
-        "description": "Vector Memory + Shared Memory routes (10 routes)."
+        "description": "Semantic vector store with embedding-based similarity search and importance scoring."
     },
     {
         "name": "Webhooks",
-        "description": "Webhooks routes (4 routes)."
-    }
+        "description": "Register, manage, and test webhook callbacks for agent event notifications."
+    },
 ]
 
 app = FastAPI(
@@ -152,10 +185,18 @@ app = FastAPI(
     "Persistent memory, task queues, message relay, and text utilities.",
     version="0.9.0",
     lifespan=lifespan,
-    docs_url="/api-docs",
+    docs_url=None,
     redoc_url=None,
-    swagger_favicon_url="/public/favicon/favicon.ico",
 )
+
+
+@app.get("/api-docs", include_in_schema=False)
+async def custom_swagger_ui():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=app.title + " — API Docs",
+        swagger_favicon_url="/public/favicon/favicon.ico",
+    )
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────
