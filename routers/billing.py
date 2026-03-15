@@ -17,6 +17,11 @@ from models import CheckoutRequest
 
 router = APIRouter()
 
+def _get_queue_email():
+    import main
+    return main._queue_email
+
+
 
 def _apply_tier(db, user_id: str, tier: str):
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
@@ -157,7 +162,7 @@ async def stripe_webhook(request: Request):
                 f"<p>Thank you for your purchase. Your account has been upgraded to the <strong>{_checkout_tier}</strong> tier.</p>"
                 "<p>Log in to your dashboard: <a href='https://moltgrid.net'>Open Dashboard</a></p>"
             )
-            _queue_email(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", confirm_html)
+            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", confirm_html)
     return {"received": True}
 
 @router.get("/v1/billing/status", tags=["Billing"])

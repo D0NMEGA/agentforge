@@ -30,8 +30,14 @@ from models import (
 
 router = APIRouter()
 
-_backend_dir = os.path.dirname(os.path.abspath(__file__))
-_web_dir = os.path.join(os.path.dirname(_backend_dir), "moltgrid-web") if not os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")) else None
+def _get_queue_email():
+    import main
+    return main._queue_email
+
+
+# __file__ is routers/system.py, so go up one level to get the project root
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_web_dir = os.path.join(os.path.dirname(_backend_dir), "moltgrid-web") if not os.path.exists(os.path.join(_backend_dir, "dashboard.html")) else None
 
 def _find_html(filename: str) -> str:
     """Find an HTML file — check backend dir first, then moltgrid-web sibling."""
@@ -153,7 +159,7 @@ def submit_contact(form: ContactForm):
 </div>
 <p style="color:#7a7a92;font-size:13px;">If you need immediate help, check our <a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">documentation</a>.</p>
 '''
-    _queue_email(form.email, "We received your message — MoltGrid", _branded_email("Message Received", confirm_body))
+    _get_queue_email()(form.email, "We received your message — MoltGrid", _branded_email("Message Received", confirm_body))
 
     # Send the actual message to the team at don.mega306@gmail.com
     team_body = f'''
@@ -171,7 +177,7 @@ def submit_contact(form: ContactForm):
 </div>
 <p style="color:#7a7a92;font-size:12px;">Submission ID: {submission_id}</p>
 '''
-    _queue_email("don.mega306@gmail.com", f"MoltGrid Contact: {form.subject or 'No subject'}", _branded_email("New Contact Submission", team_body))
+    _get_queue_email()("don.mega306@gmail.com", f"MoltGrid Contact: {form.subject or 'No subject'}", _branded_email("New Contact Submission", team_body))
     return {"status": "sent", "id": submission_id}
 
 
@@ -219,7 +225,7 @@ def health():
 
     return {
         "status": "operational",
-        "version": app.version,
+        "version": "0.9.0",
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -318,7 +324,7 @@ def dashboard_catchall(path: str):
 
 @router.get("/obstacle-course.md", tags=["System"])
 async def serve_obstacle_course_md():
-    path = os.path.join(os.path.dirname(__file__), "obstacle-course.md")
+    path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -326,7 +332,7 @@ async def serve_obstacle_course_md():
 
 @router.get("/v1/obstacle-course.md", tags=["System"])
 async def serve_obstacle_course_md_v1():
-    path = os.path.join(os.path.dirname(__file__), "obstacle-course.md")
+    path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -407,7 +413,7 @@ async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
 
 @router.get("/heartbeat.md", tags=["System"])
 async def serve_heartbeat_md():
-    hb_path = os.path.join(os.path.dirname(__file__), "heartbeat.md")
+    hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -415,7 +421,7 @@ async def serve_heartbeat_md():
 
 @router.get("/v1/heartbeat.md", tags=["System"])
 async def serve_heartbeat_md_v1():
-    hb_path = os.path.join(os.path.dirname(__file__), "heartbeat.md")
+    hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -423,7 +429,7 @@ async def serve_heartbeat_md_v1():
 
 @router.get("/skill.md", tags=["System"])
 async def serve_skill_md():
-    skill_path = os.path.join(os.path.dirname(__file__), "skill.md")
+    skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -431,7 +437,7 @@ async def serve_skill_md():
 
 @router.get("/v1/skill.md", tags=["System"])
 async def serve_skill_md_v1():
-    skill_path = os.path.join(os.path.dirname(__file__), "skill.md")
+    skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
         content = f.read()
     return Response(content=content, media_type="text/markdown")
@@ -465,7 +471,7 @@ async def network_ws(websocket: WebSocket):
 def root():
     return {
         "service": "MoltGrid",
-        "version": app.version,
+        "version": "0.9.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {

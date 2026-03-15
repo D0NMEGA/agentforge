@@ -33,10 +33,10 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6, max_length=128)
 
 class TOTP2FAVerifyRequest(BaseModel):
-    totp_code: str = Field(..., max_length=16)
+    code: str = Field(..., min_length=6, max_length=8)
 
 class TOTP2FADisableRequest(BaseModel):
-    totp_code: str = Field(..., max_length=16)
+    code: str = Field(..., min_length=6, max_length=16)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -172,32 +172,30 @@ class HeartbeatRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MemorySetRequest(BaseModel):
-    namespace: str = Field("default", max_length=64)
     key: str = Field(..., max_length=256)
     value: str = Field(..., max_length=MAX_MEMORY_VALUE_SIZE)
-    ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000)
+    namespace: str = Field("default", max_length=64)
+    ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000, description="Auto-expire after N seconds (60s-30d)")
+    visibility: str = Field("private", description="private | public | shared")
+    shared_agents: List[str] = Field(default_factory=list)
 
 class MemoryGetResponse(BaseModel):
-    agent_id: str
-    namespace: str
+    model_config = ConfigDict(extra='ignore')
     key: str
     value: str
-    created_at: str
+    namespace: str
     updated_at: str
     expires_at: Optional[str]
-    access_count: int
 
 class MemoryKeyEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     key: str
-    namespace: str
-    created_at: str
-    updated_at: str
     size_bytes: int
-    visibility: str
-    access_count: int
+    updated_at: str
+    expires_at: Optional[str]
 
 class MemoryListResponse(BaseModel):
-    agent_id: str
+    model_config = ConfigDict(extra='ignore')
     namespace: str
     keys: List[MemoryKeyEntry]
     count: int
@@ -208,25 +206,23 @@ class MemoryListResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class HealthStatsResponse(BaseModel):
-    agent_id: str
-    status: str
-    heartbeat_status: str
-    display_name: Optional[str]
-    created_at: str
-    last_seen: Optional[str]
-    request_count: int
-    memory_keys: int
-    messages_sent: int
-    messages_received: int
-    jobs_total: int
+    model_config = ConfigDict(extra='ignore')
+    registered_agents: int
+    public_agents: int
+    total_jobs: int
+    memory_keys_stored: int
+    shared_memory_keys: int
+    messages_relayed: int
+    active_webhooks: int
+    active_schedules: int
+    websocket_connections: int
 
 class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     status: str
     version: str
-    agents: int
-    total_memory_keys: int
-    total_messages: int
-    total_jobs: int
+    stats: HealthStatsResponse
+    timestamp: str
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -234,17 +230,15 @@ class HealthResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class QueueJobEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     job_id: str
-    queue_name: str
-    priority: int
     status: str
+    priority: int
     created_at: str
-    started_at: Optional[str]
     completed_at: Optional[str]
-    result: Optional[str]
 
 class QueueListResponse(BaseModel):
-    agent_id: str
+    model_config = ConfigDict(extra='ignore')
     queue_name: str
     jobs: List[QueueJobEntry]
     count: int
@@ -255,15 +249,19 @@ class QueueListResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ScheduleEntry(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     task_id: str
     cron_expr: str
     queue_name: str
+    priority: int
     enabled: bool
+    next_run_at: Optional[str]
     last_run_at: Optional[str]
-    next_run_at: str
-    run_count: int
+    run_count: Optional[int]
+    created_at: str
 
 class ScheduleListResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
     schedules: List[ScheduleEntry]
     count: int
 

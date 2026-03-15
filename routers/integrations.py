@@ -102,7 +102,9 @@ class MoltBookRegisterRequest(BaseModel):
 @router.post("/v1/moltbook/register", tags=["Integrations"])
 def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
     """Auto-provision a MoltGrid agent for a new MoltBook user. Requires X-Service-Key header."""
-    if not MOLTBOOK_SERVICE_KEY or not x_service_key or not _hmac.compare_digest(x_service_key, MOLTBOOK_SERVICE_KEY):
+    import main as _m
+    _svc_key = _m.MOLTBOOK_SERVICE_KEY
+    if not _svc_key or not x_service_key or not _hmac.compare_digest(x_service_key, _svc_key):
         raise HTTPException(403, "Invalid or missing service key")
     now = datetime.now(timezone.utc).isoformat()
     # Check for duplicate
@@ -277,7 +279,7 @@ def get_guide(platform: str):
     """Serve getting-started guide markdown for the specified platform."""
     if platform not in GUIDE_PLATFORMS:
         raise HTTPException(404, f"Guide not found. Available: {sorted(GUIDE_PLATFORMS)}")
-    guide_path = Path(__file__).parent / "docs" / "guides" / f"{platform}.md"
+    guide_path = Path(__file__).parent.parent / "docs" / "guides" / f"{platform}.md"
     if not guide_path.exists():
         raise HTTPException(404, f"Guide file not found for platform: {platform}")
     return Response(content=guide_path.read_text(), media_type="text/markdown")

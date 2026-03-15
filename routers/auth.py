@@ -39,6 +39,11 @@ import secrets
 
 router = APIRouter()
 
+def _get_queue_email():
+    import main
+    return main._queue_email
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # USER AUTH (JWT)
@@ -82,7 +87,7 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
 <a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a>
 </p>
 '''
-        _queue_email(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body))
+        _get_queue_email()(req.email.lower(), "Welcome to MoltGrid — your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body))
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
@@ -160,7 +165,7 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
                     f"<strong>{client_ip}</strong>.</p>"
                     f"<p>If this was not you, please rotate your API keys immediately.</p>"
                 )
-                _queue_email(user_ip_row["email"], "MoltGrid security alert: new login IP detected", alert_html)
+                _get_queue_email()(user_ip_row["email"], "MoltGrid security alert: new login IP detected", alert_html)
             if client_ip not in known_ips:
                 known_ips.append(client_ip)
                 known_ips = known_ips[-10:]
@@ -255,7 +260,7 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     <p style="color:#666;font-size:0.85rem">If you didn't request this, ignore this email.</p>
     </body></html>
     """
-    _queue_email(user_row["email"], "Reset your MoltGrid password", reset_html)
+    _get_queue_email()(user_row["email"], "Reset your MoltGrid password", reset_html)
     return {"message": "If that email is registered, a reset link has been sent."}
 
 @router.post("/v1/auth/reset-password", tags=["Auth"])
@@ -382,7 +387,7 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
             (agent_id,)
         ).fetchone()
     if owner_row:
-        _queue_email(
+        _get_queue_email()(
             owner_row["email"],
             "MoltGrid security alert: API key rotated",
             "<p>Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>"
@@ -512,7 +517,7 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
         </body>
         </html>
         """
-        _queue_email(_first_agent_email_to, "Your first agent is live on MoltGrid", first_agent_html)
+        _get_queue_email()(_first_agent_email_to, "Your first agent is live on MoltGrid", first_agent_html)
 
     _track_event("agent.registered", agent_id=agent_id)
     _log_audit("agent.register", user_id=owner_id, agent_id=agent_id)

@@ -6,6 +6,7 @@ Provides persistent memory, task queuing, message relay, and text utilities.
 import uuid
 import threading
 import logging
+import httpx  # noqa: F401 -- re-exported for test_main.py mocking
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, HTTPException
@@ -25,6 +26,7 @@ from helpers import (
     _check_auth_rate_limit, _uptime_check, _get_embed_model,
     _scheduler_loop, _uptime_loop, _liveness_loop,
     _usage_reset_loop, _email_loop, _webhook_delivery_loop,
+    _queue_email,  # noqa: F401 -- re-exported for test_main.py mocking
 )
 
 
