@@ -59,9 +59,42 @@ def close_pool():
 
 
 # ─── SQL Translation ─────────────────────────────────────────────────────────
+import re as _re
+
+# Precompile patterns for SQLite-to-PostgreSQL SQL translation
+_RE_DATETIME_OFFSET = _re.compile(
+    r"datetime\(([^,]+),\s*'(-?\d+)\s+seconds'\)",
+    _re.IGNORECASE,
+)
+_RE_DATETIME_DYNAMIC_OFFSET = _re.compile(
+    r"datetime\(([^,]+),\s*'-'\s*\|\|\s*\(([^)]+)\)\s*\|\|\s*'\s*seconds'\)",
+    _re.IGNORECASE,
+)
+_RE_DATETIME_SIMPLE = _re.compile(
+    r"datetime\(([^)]+)\)",
+    _re.IGNORECASE,
+)
+
+
 def _translate_sql(sql):
-    """Replace ? placeholders with %s for PostgreSQL."""
-    return sql.replace("?", "%s")
+    """Translate SQLite SQL to PostgreSQL-compatible SQL.
+
+    - Replace ? placeholders with %s
+    - Translate datetime() calls to CAST/interval expressions
+    """
+    # datetime(col, '-300 seconds') -> (CAST(col AS TIMESTAMP) + INTERVAL '-300 seconds')
+    sql = _RE_DATETIME_OFFSET.sub(
+        r"(CAST(\1 AS TIMESTAMP) + INTERVAL '\2 seconds')", sql
+    )
+    # datetime(col, '-' || (expr) || ' seconds') -> (CAST(col AS TIMESTAMP) - (\2 || ' seconds')::INTERVAL)
+    sql = _RE_DATETIME_DYNAMIC_OFFSET.sub(
+        r"(CAST(\1 AS TIMESTAMP) - (\2 || ' seconds')::INTERVAL)", sql
+    )
+    # datetime(col) -> CAST(col AS TIMESTAMP)
+    sql = _RE_DATETIME_SIMPLE.sub(r"CAST(\1 AS TIMESTAMP)", sql)
+    # Placeholder translation
+    sql = sql.replace("?", "%s")
+    return sql
 
 
 # ─── PsycopgConnWrapper ──────────────────────────────────────────────────────
