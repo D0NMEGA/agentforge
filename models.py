@@ -491,3 +491,313 @@ class EventAckRequest(BaseModel):
 class ObstacleCourseSubmitRequest(BaseModel):
     stages_completed: List[int]
     proof: str = ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RESPONSE MODELS — Pydantic response_model declarations for OpenAPI spec
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# --- Shared ---
+
+class MessageResponse(BaseModel):
+    message: str
+
+class StatusResponse(BaseModel):
+    status: str
+
+
+# --- Auth Response Models ---
+
+class AuthSignupResponse(BaseModel):
+    user_id: str
+    token: str
+    message: str
+
+class AuthLoginResponse(BaseModel):
+    user_id: Optional[str] = None
+    token: Optional[str] = None
+    requires_2fa: Optional[bool] = None
+    temp_token: Optional[str] = None
+
+class AuthMeResponse(BaseModel):
+    user_id: str
+    email: str
+    display_name: Optional[str]
+    subscription_tier: Optional[str]
+    max_agents: int
+    max_api_calls: int
+    usage_count: int
+    agent_count: int
+    created_at: str
+    last_login: Optional[str]
+
+class AuthRefreshResponse(BaseModel):
+    user_id: str
+    token: str
+
+class AuthLogoutResponse(BaseModel):
+    status: str
+
+class Auth2FASetupResponse(BaseModel):
+    secret: str
+    otpauth_uri: str
+    qr_code_url: str
+
+class Auth2FAVerifyResponse(BaseModel):
+    enabled: bool
+    recovery_codes: List[str]
+
+class Auth2FADisableResponse(BaseModel):
+    disabled: bool
+
+class NotificationPreferencesUpdateResponse(BaseModel):
+    status: str
+    preferences: dict
+
+class NotificationPreferencesGetResponse(BaseModel):
+    preferences: dict
+
+class RotateKeyResponse(BaseModel):
+    status: str
+    agent_id: str
+    api_key: str
+    message: str
+
+
+# --- Billing Response Models ---
+
+class TierDetail(BaseModel):
+    name: str
+    price: int
+    max_agents: int
+    max_api_calls: int
+    features: List[str]
+
+class PricingResponse(BaseModel):
+    tiers: dict
+    currency: str
+    billing_period: str
+
+class CheckoutResponse(BaseModel):
+    checkout_url: str
+
+class PortalResponse(BaseModel):
+    portal_url: str
+
+class BillingStatusResponse(BaseModel):
+    tier: str
+    active: bool
+    usage_this_period: int
+    payment_failed: bool
+    stripe_subscription_id: Optional[str]
+    current_period_end: Optional[str]
+    cancel_at_period_end: bool
+
+class TemplateItem(BaseModel):
+    template_id: str
+    name: str
+    description: Optional[str]
+    category: Optional[str]
+    starter_code: Optional[str]
+
+class TemplateListResponse(BaseModel):
+    templates: List[TemplateItem]
+
+class TemplateDetailResponse(BaseModel):
+    template_id: str
+    name: str
+    description: Optional[str]
+    category: Optional[str]
+    starter_code: Optional[str]
+
+
+# --- Relay Response Models ---
+
+class RelaySendResponse(BaseModel):
+    message_id: str
+    status: str
+
+class RelayMessageItem(BaseModel):
+    message_id: str
+    from_agent: str
+    channel: str
+    payload: str
+    created_at: str
+    read_at: Optional[str] = None
+
+class RelayInboxResponse(BaseModel):
+    channel: str
+    messages: List[RelayMessageItem]
+    count: int
+
+class RelayMarkReadResponse(BaseModel):
+    message_id: str
+    status: str
+
+
+# --- Webhook Response Models ---
+
+class WebhookListItem(BaseModel):
+    webhook_id: str
+    url: str
+    event_types: List[str]
+    active: bool
+    created_at: str
+
+class WebhookListResponse(BaseModel):
+    webhooks: List[WebhookListItem]
+    count: int
+
+class WebhookDeleteResponse(BaseModel):
+    status: str
+    webhook_id: str
+
+class WebhookTestResponse(BaseModel):
+    delivery_id: str
+    status: str
+    error: Optional[str]
+
+
+# --- Queue Response Models ---
+
+class QueueSubmitResponse(BaseModel):
+    job_id: str
+    status: str
+    queue_name: str
+    max_attempts: int
+
+class DeadLetterJobItem(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    job_id: str
+    queue_name: str
+    priority: int
+    attempt_count: Optional[int]
+    max_attempts: Optional[int]
+    fail_reason: Optional[str]
+    created_at: str
+    failed_at: Optional[str]
+    moved_at: Optional[str]
+
+class DeadLetterListResponse(BaseModel):
+    jobs: List[DeadLetterJobItem]
+    count: int
+
+class QueueClaimResponse(BaseModel):
+    job_id: Optional[str] = None
+    payload: Optional[str] = None
+    priority: Optional[int] = None
+    status: Optional[str] = None
+    queue_name: Optional[str] = None
+
+class QueueCompleteResponse(BaseModel):
+    job_id: str
+    status: str
+
+class QueueFailResponse(BaseModel):
+    job_id: str
+    status: str
+    attempts: int
+    max_attempts: int
+    next_retry_at: Optional[str] = None
+
+class QueueReplayResponse(BaseModel):
+    job_id: str
+    status: str
+    replayed_at: str
+
+
+# --- Schedule Response Models ---
+
+class ScheduleGetResponse(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    task_id: str
+    agent_id: str
+    cron_expr: str
+    queue_name: str
+    payload: str
+    priority: int
+    enabled: bool
+    next_run_at: Optional[str]
+    last_run_at: Optional[str]
+    run_count: Optional[int]
+    created_at: str
+
+class ScheduleToggleResponse(BaseModel):
+    task_id: str
+    enabled: bool
+
+class ScheduleDeleteResponse(BaseModel):
+    status: str
+    task_id: str
+
+
+# --- Events Response Models ---
+
+class EventItem(BaseModel):
+    event_id: str
+    event_type: str
+    payload: dict
+    created_at: str
+
+class EventAckResponse(BaseModel):
+    acknowledged: int
+
+
+# --- PubSub Response Models ---
+
+class PubSubSubscribeResponse(BaseModel):
+    channel: str
+    status: str
+    subscribed_at: Optional[str] = None
+
+class PubSubUnsubscribeResponse(BaseModel):
+    channel: str
+    status: str
+
+class PubSubSubscriptionItem(BaseModel):
+    channel: str
+    subscribed_at: str
+
+class PubSubSubscriptionsResponse(BaseModel):
+    subscriptions: List[PubSubSubscriptionItem]
+    count: int
+
+class PubSubPublishResponse(BaseModel):
+    message_id: str
+    channel: str
+    subscribers_notified: int
+    created_at: str
+
+class PubSubChannelItem(BaseModel):
+    channel: str
+    subscriber_count: int
+
+class PubSubChannelsResponse(BaseModel):
+    channels: List[PubSubChannelItem]
+    count: int
+
+
+# --- Memory Response Models ---
+
+class MemoryCrossAgentReadResponse(BaseModel):
+    key: str
+    value: str
+    namespace: str
+    visibility: str
+    updated_at: str
+    expires_at: Optional[str]
+
+class MemoryVisibilityResponse(BaseModel):
+    status: str
+    key: str
+    visibility: str
+
+class MemorySetResponse(BaseModel):
+    status: str
+    key: str
+    namespace: str
+    visibility: str
+
+class MemoryDeleteResponse(BaseModel):
+    status: str
+    key: str
