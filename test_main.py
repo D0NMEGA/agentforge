@@ -13,8 +13,9 @@ import pyotp
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
-# Use an isolated test database
+# Use an isolated test database and disable CAPTCHA for tests
 os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
+os.environ["TURNSTILE_SECRET_KEY"] = ""
 
 from fastapi.testclient import TestClient
 from main import app, init_db, DB_PATH, _ws_connections, _run_scheduler_tick, _run_liveness_check, _run_webhook_delivery_tick
