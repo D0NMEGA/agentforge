@@ -33,6 +33,11 @@ from models import (
     TOTP2FAVerifyRequest, TOTP2FADisableRequest,
     NotificationPreferencesRequest,
     RegisterRequest, RegisterResponse,
+    AuthSignupResponse, AuthLoginResponse, AuthMeResponse,
+    AuthRefreshResponse, AuthLogoutResponse, MessageResponse,
+    Auth2FASetupResponse, Auth2FAVerifyResponse, Auth2FADisableResponse,
+    NotificationPreferencesUpdateResponse, NotificationPreferencesGetResponse,
+    RotateKeyResponse,
 )
 
 import secrets
@@ -49,7 +54,7 @@ def _get_queue_email():
 # USER AUTH (JWT)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.post("/v1/auth/signup", tags=["Auth"])
+@router.post("/v1/auth/signup", response_model=AuthSignupResponse, tags=["Auth"])
 def auth_signup(req: SignupRequest, request: Request, response: Response):
     _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
@@ -115,7 +120,7 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
     )
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
-@router.post("/v1/auth/login", tags=["Auth"])
+@router.post("/v1/auth/login", response_model=AuthLoginResponse, tags=["Auth"])
 def auth_login(req: LoginRequest, request: Request, response: Response):
     _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
@@ -199,7 +204,7 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
     )
     return {"user_id": row["user_id"], "token": token}
 
-@router.get("/v1/auth/me", tags=["Auth"])
+@router.get("/v1/auth/me", response_model=AuthMeResponse, tags=["Auth"])
 def auth_me(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         row = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -219,7 +224,7 @@ def auth_me(user_id: str = Depends(get_user_id)):
         "last_login": row["last_login"],
     }
 
-@router.post("/v1/auth/refresh", tags=["Auth"])
+@router.post("/v1/auth/refresh", response_model=AuthRefreshResponse, tags=["Auth"])
 def auth_refresh(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         row = db.execute("SELECT email FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -228,14 +233,14 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
     token = _create_token(user_id, row["email"])
     return {"user_id": user_id, "token": token}
 
-@router.post("/v1/auth/logout", tags=["Auth"])
+@router.post("/v1/auth/logout", response_model=AuthLogoutResponse, tags=["Auth"])
 def auth_logout(response: Response):
     """Clear the shared auth cookie."""
     response.delete_cookie(key="mg_token", domain=".moltgrid.net", path="/")
     return {"status": "logged_out"}
 
 
-@router.post("/v1/auth/forgot-password", tags=["Auth"])
+@router.post("/v1/auth/forgot-password", response_model=MessageResponse, tags=["Auth"])
 def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     """Send a password reset link to the user's email."""
     _check_auth_rate_limit(request)
@@ -263,7 +268,7 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     _get_queue_email()(user_row["email"], "Reset your MoltGrid password", reset_html)
     return {"message": "If that email is registered, a reset link has been sent."}
 
-@router.post("/v1/auth/reset-password", tags=["Auth"])
+@router.post("/v1/auth/reset-password", response_model=MessageResponse, tags=["Auth"])
 def auth_reset_password(req: ResetPasswordRequest):
     """Reset password using a valid reset token."""
     now = datetime.now(timezone.utc).isoformat()
@@ -283,7 +288,7 @@ def auth_reset_password(req: ResetPasswordRequest):
 # TOTP 2FA
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.post("/v1/auth/2fa/setup", tags=["Auth"])
+@router.post("/v1/auth/2fa/setup", response_model=Auth2FASetupResponse, tags=["Auth"])
 def auth_2fa_setup(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         row = db.execute(
@@ -299,7 +304,7 @@ def auth_2fa_setup(user_id: str = Depends(get_user_id)):
     qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={urllib.parse.quote(uri)}"
     return {"secret": secret, "otpauth_uri": uri, "qr_code_url": qr_code_url}
 
-@router.post("/v1/auth/2fa/verify", tags=["Auth"])
+@router.post("/v1/auth/2fa/verify", response_model=Auth2FAVerifyResponse, tags=["Auth"])
 def auth_2fa_verify(req: TOTP2FAVerifyRequest, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         row = db.execute(
@@ -317,7 +322,7 @@ def auth_2fa_verify(req: TOTP2FAVerifyRequest, user_id: str = Depends(get_user_i
         )
     return {"enabled": True, "recovery_codes": plain_codes}
 
-@router.post("/v1/auth/2fa/disable", tags=["Auth"])
+@router.post("/v1/auth/2fa/disable", response_model=Auth2FADisableResponse, tags=["Auth"])
 def auth_2fa_disable(req: TOTP2FADisableRequest, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         row = db.execute(
@@ -342,7 +347,7 @@ def auth_2fa_disable(req: TOTP2FADisableRequest, user_id: str = Depends(get_user
 # USER NOTIFICATIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.post("/v1/user/notifications/preferences", tags=["User"])
+@router.post("/v1/user/notifications/preferences", response_model=NotificationPreferencesUpdateResponse, tags=["User"])
 def update_notification_preferences(req: NotificationPreferencesRequest, user_id: str = Depends(get_user_id)):
     """Update email notification preferences. Users can opt out of specific notification types."""
     with get_db() as db:
@@ -359,7 +364,7 @@ def update_notification_preferences(req: NotificationPreferencesRequest, user_id
         )
     return {"status": "updated", "preferences": current_prefs}
 
-@router.get("/v1/user/notifications/preferences", tags=["User"])
+@router.get("/v1/user/notifications/preferences", response_model=NotificationPreferencesGetResponse, tags=["User"])
 def get_notification_preferences(user_id: str = Depends(get_user_id)):
     """Get current email notification preferences."""
     with get_db() as db:
@@ -371,7 +376,7 @@ def get_notification_preferences(user_id: str = Depends(get_user_id)):
 # API KEY ROTATION (Agent-level)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.post("/v1/agents/rotate-key", tags=["Auth"])
+@router.post("/v1/agents/rotate-key", response_model=RotateKeyResponse, tags=["Auth"])
 def rotate_api_key(agent_id: str = Depends(get_agent_id)):
     """Rotate the agent's API key. Returns the new key once; old key is immediately invalid."""
     new_key = generate_api_key()
