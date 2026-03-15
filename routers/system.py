@@ -14,7 +14,7 @@ from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field
 
 from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSocketDisconnect, Response, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 import httpx
 from config import TURNSTILE_SECRET_KEY, _fernet, logger
@@ -26,6 +26,9 @@ from helpers import (
 from models import (
     HealthStatsResponse, HealthResponse,
     ContactForm, ObstacleCourseSubmitRequest, TextProcessRequest,
+    ContactSubmitResponse, SLAResponse, AgentStatsResponse, TextProcessResponse,
+    ObstacleSubmitResponse, ObstacleLeaderboardItem, ObstacleMyResultResponse,
+    RootResponse, EventAckResponse,
 )
 
 router = APIRouter()
@@ -37,24 +40,6 @@ def _get_queue_email():
 
 # __file__ is routers/system.py, so go up one level to get the project root
 _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_web_dir = os.path.join(os.path.dirname(_backend_dir), "moltgrid-web") if not os.path.exists(os.path.join(_backend_dir, "dashboard.html")) else None
-
-def _find_html(filename: str) -> str:
-    """Find an HTML file — check backend dir first, then moltgrid-web sibling."""
-    path = os.path.join(_backend_dir, filename)
-    if os.path.exists(path):
-        return path
-    alt = os.path.join("/opt/moltgrid-web", filename)
-    if os.path.exists(alt):
-        return alt
-    return path  # fallback to original (will raise FileNotFoundError)
-
-def _serve_dashboard():
-    try:
-        with open(_find_html("dashboard.html"), "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        raise HTTPException(404, "Dashboard not found")
 
 
 @router.get("/api-redoc", response_class=HTMLResponse, include_in_schema=False)
@@ -74,44 +59,22 @@ def custom_redoc():
 
 
 
-@router.get("/docs", response_class=HTMLResponse, tags=["Documentation"], include_in_schema=False)
-def docs_page():
-    """Serve the comprehensive documentation page."""
-    html_path = _find_html("docs.html")
-    try:
-        with open(html_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        raise HTTPException(404, "Documentation page not found")
+@router.get("/docs", include_in_schema=False)
+def redirect_docs():
+    return RedirectResponse(url="https://moltgrid.net/docs", status_code=301)
 
-@router.get("/privacy", response_class=HTMLResponse, tags=["System"], include_in_schema=False)
-def privacy_page():
-    """Serve the privacy policy page."""
-    try:
-        with open(_find_html("privacy.html"), "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        raise HTTPException(404, "Privacy policy not found")
+@router.get("/privacy", include_in_schema=False)
+def redirect_privacy():
+    return RedirectResponse(url="https://moltgrid.net/privacy", status_code=301)
 
-@router.get("/terms", response_class=HTMLResponse, tags=["System"], include_in_schema=False)
-def terms_page():
-    """Serve the terms of service page."""
-    try:
-        with open(_find_html("terms.html"), "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        raise HTTPException(404, "Terms of service not found")
+@router.get("/terms", include_in_schema=False)
+def redirect_terms():
+    return RedirectResponse(url="https://moltgrid.net/terms", status_code=301)
 
 
-@router.get("/contact", response_class=HTMLResponse, tags=["System"])
-def contact_page():
-    """Serve the contact form page."""
-    html_path = _find_html("contact.html")
-    try:
-        with open(html_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        raise HTTPException(404, "Contact page not found")
+@router.get("/contact", include_in_schema=False)
+def redirect_contact():
+    return RedirectResponse(url="https://moltgrid.net/contact", status_code=301)
 
 class ContactForm(BaseModel):
     name: str = ""
@@ -120,7 +83,7 @@ class ContactForm(BaseModel):
     message: str
     turnstile_token: Optional[str] = None
 
-@router.post("/v1/contact", tags=["System"])
+@router.post("/v1/contact", response_model=ContactSubmitResponse, tags=["System"])
 def submit_contact(form: ContactForm):
     """Public contact form submission — no auth required."""
     if not form.email or not form.message:
@@ -181,7 +144,7 @@ def submit_contact(form: ContactForm):
     return {"status": "sent", "id": submission_id}
 
 
-@router.get("/v1/sla", tags=["System"])
+@router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
 def sla():
     """Public SLA / uptime information — no auth required."""
     with get_db() as db:
@@ -241,7 +204,7 @@ def health():
     }
 
 
-@router.get("/v1/stats", tags=["System"])
+@router.get("/v1/stats", response_model=AgentStatsResponse, tags=["System"])
 def stats(agent_id: str = Depends(get_agent_id)):
     """Your agent's usage stats."""
     with get_db() as db:
@@ -284,7 +247,7 @@ class TextProcessRequest(BaseModel):
     text: str = Field(..., max_length=50_000)
     operation: str = Field(..., description="One of: word_count, char_count, extract_urls, extract_emails, tokenize_sentences, deduplicate_lines, hash_sha256, base64_encode, base64_decode")
 
-@router.post("/v1/text/process", tags=["Text Utilities"])
+@router.post("/v1/text/process", response_model=TextProcessResponse, tags=["Text Utilities"])
 def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
     """Server-side text processing. Requires authentication."""
     import re
@@ -313,13 +276,10 @@ def text_process(req: TextProcessRequest, agent_id: str = Depends(get_agent_id))
     return {"operation": req.operation, "result": result, "agent_id": agent_id}
 
 
-@router.get("/dashboard", response_class=HTMLResponse, tags=["Dashboard"])
-def dashboard_root():
-    return _serve_dashboard()
-
-@router.get("/dashboard/{path:path}", response_class=HTMLResponse, tags=["Dashboard"])
-def dashboard_catchall(path: str):
-    return _serve_dashboard()
+@router.get("/dashboard", include_in_schema=False)
+@router.get("/dashboard/{path:path}", include_in_schema=False)
+def redirect_dashboard(path: str = ""):
+    return RedirectResponse(url=f"https://moltgrid.net/dashboard{'/' + path if path else ''}", status_code=301)
 
 
 @router.get("/obstacle-course.md", tags=["System"])
@@ -338,7 +298,7 @@ async def serve_obstacle_course_md_v1():
     return Response(content=content, media_type="text/markdown")
 
 
-@router.post("/v1/obstacle-course/submit", tags=["Obstacle Course"])
+@router.post("/v1/obstacle-course/submit", response_model=ObstacleSubmitResponse, tags=["Obstacle Course"])
 async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
     stages = sorted(set(s for s in body.stages_completed if 1 <= s <= 10))
     base_score = len(stages) * 10
@@ -369,7 +329,7 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
     return {"submission_id": submission_id, "score": score, "stages_completed": stages, "feedback": feedback}
 
 
-@router.get("/v1/obstacle-course/leaderboard", tags=["Obstacle Course"])
+@router.get("/v1/obstacle-course/leaderboard", response_model=List[ObstacleLeaderboardItem], tags=["Obstacle Course"])
 async def obstacle_leaderboard():
     with get_db() as db:
         rows = db.execute(
@@ -392,7 +352,7 @@ async def obstacle_leaderboard():
     ]
 
 
-@router.get("/v1/obstacle-course/my-result", tags=["Obstacle Course"])
+@router.get("/v1/obstacle-course/my-result", response_model=ObstacleMyResultResponse, tags=["Obstacle Course"])
 async def obstacle_my_result(agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         row = db.execute(
@@ -467,7 +427,7 @@ async def network_ws(websocket: WebSocket):
             _network_ws_clients.remove(websocket)
 
 
-@router.get("/", tags=["System"])
+@router.get("/", response_model=RootResponse, tags=["System"])
 def root():
     return {
         "service": "MoltGrid",

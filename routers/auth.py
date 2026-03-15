@@ -62,6 +62,21 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
     now = datetime.now(timezone.utc).isoformat()
     pw_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
 
+    # Validate display_name (username)
+    if req.display_name:
+        import re
+        if not re.match(r'^[A-Za-z0-9_]+$', req.display_name):
+            raise HTTPException(422, "Username can only contain letters, numbers, and underscores")
+        if len(req.display_name) > 30:
+            raise HTTPException(422, "Username must be 30 characters or fewer")
+        with get_db() as db:
+            existing_name = db.execute(
+                "SELECT user_id FROM users WHERE LOWER(display_name) = LOWER(?)",
+                (req.display_name,)
+            ).fetchone()
+            if existing_name:
+                raise HTTPException(409, "Username already taken")
+
     send_welcome = False
     with get_db() as db:
         existing = db.execute("SELECT user_id FROM users WHERE email = ?", (req.email.lower(),)).fetchone()
