@@ -50,7 +50,7 @@ def _tier_from_price(price_id: str) -> str:
     return "free"
 
 
-@router.get("/v1/pricing", tags=["Billing"])
+@router.get("/v1/pricing", tags=["Billing"], response_model=PricingResponse)
 def get_pricing():
     return {
         "tiers": {
@@ -67,7 +67,7 @@ def get_pricing():
         "billing_period": "monthly",
     }
 
-@router.post("/v1/billing/checkout", tags=["Billing"])
+@router.post("/v1/billing/checkout", tags=["Billing"], response_model=CheckoutResponse)
 def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
     if req.tier not in STRIPE_TIER_PRICES:
         raise HTTPException(400, f"Invalid tier '{req.tier}'. Must be: hobby, team, or scale")
@@ -91,7 +91,7 @@ def billing_checkout(req: CheckoutRequest, user_id: str = Depends(get_user_id)):
     _track_event("billing.checkout_started", user_id=user_id, metadata={"tier": req.tier})
     return {"checkout_url": session.url}
 
-@router.post("/v1/billing/portal", tags=["Billing"])
+@router.post("/v1/billing/portal", tags=["Billing"], response_model=PortalResponse)
 def billing_portal(user_id: str = Depends(get_user_id)):
     if not STRIPE_SECRET_KEY:
         raise HTTPException(503, "Stripe is not configured on this server")
@@ -169,7 +169,7 @@ async def stripe_webhook(request: Request):
             _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", confirm_html)
     return {"received": True}
 
-@router.get("/v1/billing/status", tags=["Billing"])
+@router.get("/v1/billing/status", tags=["Billing"], response_model=BillingStatusResponse)
 def billing_status(user_id: str = Depends(get_user_id)):
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)).fetchone()
@@ -193,13 +193,13 @@ def billing_status(user_id: str = Depends(get_user_id)):
             pass
     return result
 
-@router.get("/v1/templates", tags=["Templates"])
+@router.get("/v1/templates", tags=["Templates"], response_model=TemplateListResponse)
 def list_templates():
     with get_db() as db:
         rows = db.execute("SELECT template_id, name, description, category, starter_code FROM templates ORDER BY name").fetchall()
     return {"templates": [{"template_id": r["template_id"], "name": r["name"], "description": r["description"], "category": r["category"], "starter_code": r["starter_code"]} for r in rows]}
 
-@router.get("/v1/templates/{template_id}", tags=["Templates"])
+@router.get("/v1/templates/{template_id}", tags=["Templates"], response_model=TemplateDetailResponse)
 def get_template(template_id: str):
     with get_db() as db:
         row = db.execute("SELECT template_id, name, description, category, starter_code FROM templates WHERE template_id = ?", (template_id,)).fetchone()

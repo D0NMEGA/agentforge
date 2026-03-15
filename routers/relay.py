@@ -11,11 +11,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSock
 from db import get_db
 from state import _ws_connections
 from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event, hash_key
-from models import RelayMessage
+from models import RelayMessage, RelaySendResponse, RelayInboxResponse, RelayMarkReadResponse
 
 router = APIRouter()
 
-@router.post("/v1/relay/send", tags=["Relay"])
+@router.post("/v1/relay/send", tags=["Relay"], response_model=RelaySendResponse)
 def relay_send(msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
     """Send a message to another agent."""
     message_id = f"msg_{uuid.uuid4().hex[:16]}"
@@ -71,7 +71,7 @@ def relay_send(msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
 
     return {"message_id": message_id, "status": "delivered"}
 
-@router.get("/v1/relay/inbox", tags=["Relay"])
+@router.get("/v1/relay/inbox", tags=["Relay"], response_model=RelayInboxResponse)
 def relay_inbox(
     channel: str = "direct",
     unread_only: bool = True,
@@ -97,7 +97,7 @@ def relay_inbox(
         m["payload"] = _decrypt(m["payload"])
     return {"channel": channel, "messages": messages, "count": len(messages)}
 
-@router.post("/v1/relay/{message_id}/read", tags=["Relay"])
+@router.post("/v1/relay/{message_id}/read", tags=["Relay"], response_model=RelayMarkReadResponse)
 def relay_mark_read(message_id: str, agent_id: str = Depends(get_agent_id)):
     """Mark a message as read."""
     now = datetime.now(timezone.utc).isoformat()

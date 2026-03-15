@@ -10,11 +10,15 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from db import get_db
 from state import _ws_connections
 from helpers import get_agent_id, _encrypt, _fire_webhooks
-from models import PubSubSubscribeRequest, PubSubPublishRequest
+from models import (
+    PubSubSubscribeRequest, PubSubPublishRequest,
+    PubSubSubscribeResponse, PubSubUnsubscribeResponse,
+    PubSubSubscriptionsResponse, PubSubPublishResponse, PubSubChannelsResponse,
+)
 
 router = APIRouter()
 
-@router.post("/v1/pubsub/subscribe", tags=["Pub/Sub"])
+@router.post("/v1/pubsub/subscribe", tags=["Pub/Sub"], response_model=PubSubSubscribeResponse)
 def pubsub_subscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Subscribe to a broadcast channel."""
     now = datetime.now(timezone.utc).isoformat()
@@ -31,7 +35,7 @@ def pubsub_subscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_ag
         )
     return {"channel": req.channel, "status": "subscribed", "subscribed_at": now}
 
-@router.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"])
+@router.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"], response_model=PubSubUnsubscribeResponse)
 def pubsub_unsubscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Unsubscribe from a broadcast channel."""
     with get_db() as db:
@@ -43,7 +47,7 @@ def pubsub_unsubscribe(req: PubSubSubscribeRequest, agent_id: str = Depends(get_
             raise HTTPException(404, "Not subscribed to this channel")
     return {"channel": req.channel, "status": "unsubscribed"}
 
-@router.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"])
+@router.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"], response_model=PubSubSubscriptionsResponse)
 def pubsub_list_subscriptions(agent_id: str = Depends(get_agent_id)):
     """List all channels this agent is subscribed to."""
     with get_db() as db:
@@ -53,7 +57,7 @@ def pubsub_list_subscriptions(agent_id: str = Depends(get_agent_id)):
         ).fetchall()
     return {"subscriptions": [dict(r) for r in rows], "count": len(rows)}
 
-@router.post("/v1/pubsub/publish", tags=["Pub/Sub"])
+@router.post("/v1/pubsub/publish", tags=["Pub/Sub"], response_model=PubSubPublishResponse)
 async def pubsub_publish(req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
     """Publish a message to all subscribers of a channel."""
     now = datetime.now(timezone.utc).isoformat()
@@ -109,7 +113,7 @@ async def pubsub_publish(req: PubSubPublishRequest, agent_id: str = Depends(get_
         "subscribers_notified": len(recipients), "created_at": now,
     }
 
-@router.get("/v1/pubsub/channels", tags=["Pub/Sub"])
+@router.get("/v1/pubsub/channels", tags=["Pub/Sub"], response_model=PubSubChannelsResponse)
 def pubsub_list_channels(agent_id: str = Depends(get_agent_id)):
     """List all active pub/sub channels with subscriber counts."""
     with get_db() as db:
