@@ -29,6 +29,37 @@ if _DB_BACKEND in ("postgres", "dual"):
     db_module.init_pool()
 
 
+def _get_table_columns(conn, table_name):
+    """Get column names for a table, abstracting over SQLite/Postgres."""
+    if _DB_BACKEND in ("postgres", "dual"):
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,)
+        ).fetchall()
+        return {r[0] if isinstance(r, tuple) else r["column_name"] for r in rows}
+    else:
+        rows = conn.execute("PRAGMA table_info(%s)" % table_name).fetchall()
+        return {row[1] for row in rows}
+
+
+def _get_test_db():
+    """Get a test database connection for the current backend.
+    For SQLite: returns a sqlite3 connection with Row factory.
+    For Postgres: returns a wrapped psycopg connection with SQL translation.
+    Caller is responsible for closing the connection.
+    """
+    if _DB_BACKEND in ("postgres", "dual"):
+        import psycopg
+        from psycopg.rows import dict_row
+        raw_conn = psycopg.connect(os.getenv("DATABASE_URL", ""), row_factory=dict_row)
+        return db_module._PsycopgConnWrapper(raw_conn)
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
 def _truncate_all_pg_tables():
     """Truncate all tables in PostgreSQL for a fresh test state."""
     with db_module.get_db() as conn:
@@ -242,8 +273,7 @@ class TestQueue:
         client.post(f"/v1/queue/{job_id}/complete", params={"result": "ok"}, headers=h)
         # Verify webhook delivery was queued
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         deliveries = conn.execute("SELECT * FROM webhook_deliveries WHERE event_type='job.completed'").fetchall()
         conn.close()
         assert len(deliveries) >= 1
@@ -598,7 +628,7 @@ class TestSchedules:
 
         # Manually set next_run_at to the past
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         conn.execute(
             "UPDATE scheduled_tasks SET next_run_at = '2000-01-01T00:00:00' WHERE task_id = ?",
             (task_id,)
@@ -1074,7 +1104,7 @@ class TestRateLimiting:
         """After exceeding the limit, requests should return 429."""
         _, _, h = register_agent()
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         # Artificially set high count
         window = int(time.time()) // 60
         aid = client.get("/v1/stats", headers=h).json()["agent_id"]
@@ -1532,8 +1562,7 @@ class TestDeadLetterQueue:
         client.post(f"/v1/queue/{job_id}/fail", json={"reason": "boom"}, headers=h)
         # Verify webhook delivery was queued for job.failed
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         deliveries = conn.execute("SELECT * FROM webhook_deliveries WHERE event_type='job.failed'").fetchall()
         conn.close()
         assert len(deliveries) >= 1
@@ -1609,7 +1638,7 @@ class TestHeartbeat:
         assert me["heartbeat_status"] == "online"
 
         # Manually set heartbeat_at to far in the past (beyond 2x interval)
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         conn.execute(
             "UPDATE agents SET heartbeat_at = '2000-01-01T00:00:00+00:00' WHERE agent_id = ?",
             (aid,)
@@ -1738,7 +1767,7 @@ class TestUserAuth:
         token = r.json()["token"]
         # Bump max_agents to allow 2
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         conn.execute("UPDATE users SET max_agents = 5 WHERE user_id = ?", (r.json()["user_id"],))
         conn.commit()
         conn.close()
@@ -1787,7 +1816,7 @@ class TestUserAuth:
             agent_headers = {"X-API-Key": api_key}
             # Set usage_count to max_api_calls - 1 (free = 10000)
             import sqlite3
-            conn = sqlite3.connect(DB_PATH)
+            conn = _get_test_db()
             conn.execute("UPDATE users SET usage_count = 9999 WHERE user_id = ?", (user_id,))
             conn.commit()
             conn.close()
@@ -2442,7 +2471,7 @@ class TestAnalytics:
     def _query_analytics(self, sql, params=()):
         """Helper to query analytics_events without leaking connections on Windows."""
         import sqlite3, contextlib
-        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        with contextlib.closing(_get_test_db()) as conn:
             conn.row_factory = sqlite3.Row
             return conn.execute(sql, params).fetchall()
 
@@ -2519,8 +2548,7 @@ class TestMemoryVisibilitySchema:
         """Return a raw sqlite3 connection (row_factory = sqlite3.Row)."""
         import sqlite3
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         return conn
 
     # ── Schema migration ──────────────────────────────────────────────────────
@@ -2528,14 +2556,14 @@ class TestMemoryVisibilitySchema:
     def test_memory_table_has_visibility_column(self):
         """init_db() adds visibility column to memory table."""
         conn = self._raw_db()
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+        cols = _get_table_columns(conn, "memory")
         conn.close()
         assert "visibility" in cols, "memory table must have 'visibility' column"
 
     def test_memory_table_has_shared_agents_column(self):
         """init_db() adds shared_agents column to memory table."""
         conn = self._raw_db()
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(memory)").fetchall()}
+        cols = _get_table_columns(conn, "memory")
         conn.close()
         assert "shared_agents" in cols, "memory table must have 'shared_agents' column"
 
@@ -2569,8 +2597,7 @@ class TestMemoryVisibilitySchema:
         import sqlite3
         from main import DB_PATH, init_db
         # Directly insert a row without visibility (simulating pre-migration data)
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         # Insert a raw row bypassing visibility
         conn.execute(
             "INSERT OR REPLACE INTO memory "
@@ -2584,8 +2611,7 @@ class TestMemoryVisibilitySchema:
         conn.close()
         # Re-run init_db — should backfill NULL -> 'private'
         init_db()
-        conn2 = sqlite3.connect(DB_PATH)
-        conn2.row_factory = sqlite3.Row
+        conn2 = _get_test_db()
         row = conn2.execute(
             "SELECT visibility FROM memory WHERE agent_id='agent_backfill_test'"
         ).fetchone()
@@ -2689,8 +2715,7 @@ class TestMemoryVisibilitySchema:
         assert r.status_code == 200
         import sqlite3
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         row = conn.execute("SELECT visibility FROM memory WHERE key='k'").fetchone()
         conn.close()
         assert row is not None
@@ -2703,8 +2728,7 @@ class TestMemoryVisibilitySchema:
         assert r.status_code == 200
         import sqlite3
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         row = conn.execute("SELECT visibility FROM memory WHERE key='k'").fetchone()
         conn.close()
         assert row["visibility"] == "public"
@@ -2721,8 +2745,7 @@ class TestMemoryVisibilitySchema:
         assert r.status_code == 200
         import sqlite3, json
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         row = conn.execute("SELECT visibility, shared_agents FROM memory WHERE key='k'").fetchone()
         conn.close()
         assert row["visibility"] == "shared"
@@ -2851,8 +2874,7 @@ class TestMemoryVisibilityEndpoint:
         # aid2 should be able to read it
         import sqlite3
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         row = conn.execute(
             "SELECT shared_agents FROM memory WHERE key='sharedkey'",
         ).fetchone()
@@ -2932,8 +2954,7 @@ class TestMemoryAuditLog:
         """Return a raw sqlite3 connection to inspect audit log."""
         import sqlite3
         from main import DB_PATH
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         return conn
 
     def _audit_rows(self, agent_id=None, action=None, key=None):
@@ -3251,8 +3272,7 @@ class TestMemoryDashboardEndpoints:
             headers=self._auth_header(token),
         )
 
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
+        conn = _get_test_db()
         rows = conn.execute(
             "SELECT * FROM memory_access_log WHERE agent_id=? AND action='visibility_changed'",
             (agent_id,),
@@ -3302,26 +3322,23 @@ class TestPhase2Schema:
 
     def test_agents_has_moltbook_profile_id(self):
         """agents table must have moltbook_profile_id column after migration."""
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(agents)").fetchall()}
+        conn = _get_test_db()
+        cols = _get_table_columns(conn, "agents")
         conn.close()
         assert "moltbook_profile_id" in cols, f"moltbook_profile_id missing from agents; cols={cols}"
 
     def test_analytics_events_has_source(self):
         """analytics_events must have source and moltbook_url columns."""
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(analytics_events)").fetchall()}
+        conn = _get_test_db()
+        cols = _get_table_columns(conn, "analytics_events")
         conn.close()
         assert "source" in cols, f"source missing from analytics_events; cols={cols}"
         assert "moltbook_url" in cols, f"moltbook_url missing from analytics_events; cols={cols}"
 
     def test_integrations_table_exists(self):
         """integrations table must exist with correct schema."""
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(integrations)").fetchall()}
+        conn = _get_test_db()
+        cols = _get_table_columns(conn, "integrations")
         conn.close()
         for expected in ("id", "agent_id", "platform", "config", "status", "created_at"):
             assert expected in cols, f"'{expected}' missing from integrations table; cols={cols}"
@@ -4065,7 +4082,7 @@ class TestOrgAccounts:
         """organizations and org_members tables must exist."""
         from main import DB_PATH
         import sqlite3
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         conn.close()
         assert "organizations" in tables, "organizations table missing"
@@ -4348,7 +4365,7 @@ class TestAgentEventStream:
     def _insert_event(self, agent_id, event_type="test_event"):
         """Helper: directly insert an event into agent_events for testing."""
         import sqlite3, uuid
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         eid = str(uuid.uuid4())
         conn.execute(
             "INSERT INTO agent_events (event_id, agent_id, event_type, payload, acknowledged, created_at) VALUES (?,?,?,?,0,?)",
@@ -4417,7 +4434,7 @@ class TestWebSocketEvents:
         import sqlite3, uuid
         _id, key, h = register_agent("ws-test2")
         eid = str(uuid.uuid4())
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_test_db()
         conn.execute(
             "INSERT INTO agent_events (event_id, agent_id, event_type, payload, acknowledged, created_at) VALUES (?,?,?,?,0,?)",
             (eid, _id, "test_ws_event", json.dumps({"hello": "world"}), datetime.utcnow().isoformat())
