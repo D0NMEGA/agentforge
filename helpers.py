@@ -676,6 +676,14 @@ def _get_embed_model():
     return _state._embed_model
 
 
+def _embed_text(text):
+    """Embed text using the shared singleton model. Returns L2-normalized numpy array."""
+    model = _get_embed_model()
+    embedding = model.encode(text, convert_to_numpy=True)
+    embedding = embedding / np.linalg.norm(embedding)
+    return embedding
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # ONBOARDING
 # ═══════════════════════════════════════════════════════════════════════════════

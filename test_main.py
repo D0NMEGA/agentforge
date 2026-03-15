@@ -4686,3 +4686,119 @@ class TestObstacleCourse:
             json={"status": "worker_running", "metadata": {"test": True}},
             headers=h)
         assert r.status_code == 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TIERED MEMORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestTieredMemory:
+    def test_tiered_store_event(self):
+        """POST /v1/tiered/store_event appends event to session buffer."""
+        _, _, h = register_agent("tiered-store")
+        # Create a session first
+        sid = client.post("/v1/sessions", json={"title": "Tiered Test"}, headers=h).json()["session_id"]
+        # Store an event
+        r = client.post("/v1/tiered/store_event", json={
+            "session_id": sid,
+            "data": "test event content",
+            "role": "user",
+        }, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "stored"
+        assert d["session_id"] == sid
+        assert d["message_count"] >= 1
+        assert d["token_count"] > 0
+        assert d["persisted"] is False
+
+    def test_tiered_store_event_persist(self):
+        """POST /v1/tiered/store_event with persist=True writes to mid-term memory."""
+        _, _, h = register_agent("tiered-persist")
+        sid = client.post("/v1/sessions", json={"title": "Persist Test"}, headers=h).json()["session_id"]
+        r = client.post("/v1/tiered/store_event", json={
+            "session_id": sid,
+            "data": "important note for persistence",
+            "role": "user",
+            "persist": True,
+            "note_key": "test_note_tiered",
+        }, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["persisted"] is True
+        assert d["note_key"] == "test_note_tiered"
+        # Verify the note exists in mid-term memory
+        r2 = client.get("/v1/memory/test_note_tiered?namespace=notes", headers=h)
+        assert r2.status_code == 200
+        assert "important note" in r2.json()["value"]
+
+    def test_tiered_recall(self):
+        """POST /v1/tiered/recall searches mid-term and long-term tiers."""
+        _, _, h = register_agent("tiered-recall")
+        # Store a vector entry (long-term)
+        client.post("/v1/vector/upsert", json={
+            "key": "ml_concepts",
+            "text": "machine learning concepts and neural networks",
+            "namespace": "default",
+        }, headers=h)
+        # Store a memory entry (mid-term)
+        client.post("/v1/memory", json={
+            "key": "ml_note",
+            "value": "machine learning is important for AI",
+            "namespace": "notes",
+        }, headers=h)
+        # Recall
+        r = client.post("/v1/tiered/recall", json={
+            "query": "machine learning",
+            "k": 5,
+            "tiers": ["mid", "long"],
+        }, headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["count"] > 0
+        assert len(d["results"]) > 0
+        for item in d["results"]:
+            assert "tier" in item
+            assert "key" in item
+            assert "text" in item
+            assert "score" in item
+            assert item["tier"] in ("mid", "long")
+
+    def test_tiered_summarize(self):
+        """POST /v1/tiered/summarize/{session_id} summarizes and promotes to vector store."""
+        _, _, h = register_agent("tiered-summarize")
+        sid = client.post("/v1/sessions", json={"title": "Summarize Test"}, headers=h).json()["session_id"]
+        # Append enough messages to trigger summary (>10 non-system)
+        for i in range(12):
+            client.post(f"/v1/sessions/{sid}/messages", json={
+                "role": "user",
+                "content": f"Message number {i} about artificial intelligence research and development"
+            }, headers=h)
+        # Summarize
+        r = client.post(f"/v1/tiered/summarize/{sid}", headers=h)
+        assert r.status_code == 200
+        d = r.json()
+        assert d["status"] == "summarized"
+        assert d["promoted"] is True or d["promoted"] is False  # bool
+        assert d["vector_key"].startswith("session_summary_")
+        assert d["vector_namespace"] == "long_term"
+        assert isinstance(d["summary_text"], str)
+
+    def test_tiered_summarize_idempotent(self):
+        """Calling summarize twice on same session is idempotent."""
+        _, _, h = register_agent("tiered-idempotent")
+        sid = client.post("/v1/sessions", json={"title": "Idempotent Test"}, headers=h).json()["session_id"]
+        for i in range(12):
+            client.post(f"/v1/sessions/{sid}/messages", json={
+                "role": "user",
+                "content": f"Idempotent test message {i} about data science and analytics"
+            }, headers=h)
+        # First summarize
+        r1 = client.post(f"/v1/tiered/summarize/{sid}", headers=h)
+        assert r1.status_code == 200
+        key1 = r1.json()["vector_key"]
+        # Second summarize — should not error, same key
+        r2 = client.post(f"/v1/tiered/summarize/{sid}", headers=h)
+        assert r2.status_code == 200
+        key2 = r2.json()["vector_key"]
+        assert key1 == key2

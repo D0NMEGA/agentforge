@@ -155,10 +155,12 @@ init_db()
 from routers import auth, dashboard, billing, memory, queue, relay          # noqa: E402
 from routers import webhooks, schedules, vector, directory, marketplace     # noqa: E402
 from routers import pubsub, integrations, sessions, events, orgs, admin, system  # noqa: E402
+from routers import tiered_memory                                           # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(billing.router)
+app.include_router(tiered_memory.router)
 app.include_router(memory.router)
 app.include_router(queue.router)
 app.include_router(relay.router)

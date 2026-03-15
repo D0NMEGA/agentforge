@@ -12,21 +12,21 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 
 from config import MAX_MEMORY_VALUE_SIZE
 from db import get_db
-from helpers import get_agent_id, _encrypt, _decrypt, _get_embed_model
-from models import VectorUpsertRequest, VectorSearchRequest, SharedMemorySetRequest
+from helpers import get_agent_id, _encrypt, _decrypt, _get_embed_model, _embed_text
+from models import (
+    VectorUpsertRequest, VectorSearchRequest, SharedMemorySetRequest,
+    VectorUpsertResponse, VectorSearchResponse, VectorGetResponse,
+    VectorDeleteResponse, VectorListResponse,
+    SharedMemorySetResponse, SharedMemoryListResponse,
+    SharedMemoryDeleteResponse, SharedMemoryNamespacesResponse,
+)
 
 router = APIRouter()
-
-def _embed_text(text):
-    model = _get_embed_model()
-    embedding = model.encode(text, convert_to_numpy=True)
-    embedding = embedding / np.linalg.norm(embedding)
-    return embedding
 
 def _cosine_similarity(vec1, vec2):
     return float(np.dot(vec1, vec2))
 
-@router.post("/v1/vector/upsert", tags=["Vector Memory"])
+@router.post("/v1/vector/upsert", response_model=VectorUpsertResponse, tags=["Vector Memory"])
 def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id)):
     """Store text with its embedding vector. Updates if key exists (UPSERT).
 
@@ -57,7 +57,7 @@ def vector_upsert(req: VectorUpsertRequest, agent_id: str = Depends(get_agent_id
         "status": "upserted"
     }
 
-@router.post("/v1/vector/search", tags=["Vector Memory"])
+@router.post("/v1/vector/search", response_model=VectorSearchResponse, tags=["Vector Memory"])
 def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id)):
     """Semantic search with optional composite scoring.
 
@@ -119,7 +119,7 @@ def vector_search(req: VectorSearchRequest, agent_id: str = Depends(get_agent_id
 
     return {"results": results, "count": len(results), "scoring": req.scoring}
 
-@router.get("/v1/vector/{key}", tags=["Vector Memory"])
+@router.get("/v1/vector/{key}", response_model=VectorGetResponse, tags=["Vector Memory"])
 def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """Get a specific vector entry by key."""
     with get_db() as db:
@@ -140,7 +140,7 @@ def vector_get(key: str, namespace: str = "default", agent_id: str = Depends(get
         "updated_at": row["updated_at"]
     }
 
-@router.delete("/v1/vector/{key}", tags=["Vector Memory"])
+@router.delete("/v1/vector/{key}", response_model=VectorDeleteResponse, tags=["Vector Memory"])
 def vector_delete(key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """Delete a vector entry."""
     with get_db() as db:
@@ -153,7 +153,7 @@ def vector_delete(key: str, namespace: str = "default", agent_id: str = Depends(
 
     return {"status": "deleted", "key": key, "namespace": namespace}
 
-@router.get("/v1/vector", tags=["Vector Memory"])
+@router.get("/v1/vector", response_model=VectorListResponse, tags=["Vector Memory"])
 def vector_list(namespace: str = "default", limit: int = Query(100, le=1000), agent_id: str = Depends(get_agent_id)):
     """List all vector keys in a namespace (without embeddings for efficiency)."""
     with get_db() as db:
@@ -180,7 +180,7 @@ class SharedMemorySetRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=256, description="Human-readable description of this entry")
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000)
 
-@router.post("/v1/shared-memory", tags=["Shared Memory"])
+@router.post("/v1/shared-memory", response_model=SharedMemorySetResponse, tags=["Shared Memory"])
 def shared_memory_set(req: SharedMemorySetRequest, agent_id: str = Depends(get_agent_id)):
     """Publish a key-value pair to a shared namespace that other agents can read."""
     now = datetime.now(timezone.utc)
@@ -200,7 +200,7 @@ def shared_memory_set(req: SharedMemorySetRequest, agent_id: str = Depends(get_a
               enc_value, req.description, now.isoformat(), expires))
     return {"status": "published", "namespace": req.namespace, "key": req.key}
 
-@router.get("/v1/shared-memory/{namespace}", tags=["Shared Memory"])
+@router.get("/v1/shared-memory/{namespace}", response_model=SharedMemoryListResponse, tags=["Shared Memory"])
 def shared_memory_list(
     namespace: str,
     prefix: str = "",
@@ -234,7 +234,7 @@ def shared_memory_get(namespace: str, key: str, agent_id: str = Depends(get_agen
     d["value"] = _decrypt(d["value"])
     return d
 
-@router.delete("/v1/shared-memory/{namespace}/{key}", tags=["Shared Memory"])
+@router.delete("/v1/shared-memory/{namespace}/{key}", response_model=SharedMemoryDeleteResponse, tags=["Shared Memory"])
 def shared_memory_delete(namespace: str, key: str, agent_id: str = Depends(get_agent_id)):
     """Delete a key from a shared namespace (only the owner can delete)."""
     with get_db() as db:
@@ -246,7 +246,7 @@ def shared_memory_delete(namespace: str, key: str, agent_id: str = Depends(get_a
             raise HTTPException(404, "Key not found or you are not the owner")
     return {"status": "deleted", "namespace": namespace, "key": key}
 
-@router.get("/v1/shared-memory", tags=["Shared Memory"])
+@router.get("/v1/shared-memory", response_model=SharedMemoryNamespacesResponse, tags=["Shared Memory"])
 def shared_memory_namespaces(agent_id: str = Depends(get_agent_id)):
     """List all shared namespaces with entry counts."""
     now = datetime.now(timezone.utc).isoformat()
