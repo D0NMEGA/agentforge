@@ -108,9 +108,11 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
         max_age=JWT_EXPIRY_DAYS * 86400,
     )
     # Non-sensitive indicator cookie for frontend logged-in state detection
+    # Contains username (email prefix) so JS can display it without reading HttpOnly token
+    display_name = req.email.split("@")[0] if "@" in req.email else "Account"
     response.set_cookie(
         key="mg_logged_in",
-        value="1",
+        value=display_name,
         domain=".moltgrid.net",
         path="/",
         httponly=False,
@@ -192,9 +194,11 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
         max_age=JWT_EXPIRY_DAYS * 86400,
     )
     # Non-sensitive indicator cookie for frontend logged-in state detection
+    # Contains username (email prefix) so JS can display it without reading HttpOnly token
+    display_name = req.email.split("@")[0] if "@" in req.email else "Account"
     response.set_cookie(
         key="mg_logged_in",
-        value="1",
+        value=display_name,
         domain=".moltgrid.net",
         path="/",
         httponly=False,
@@ -235,8 +239,9 @@ def auth_refresh(user_id: str = Depends(get_user_id)):
 
 @router.post("/v1/auth/logout", response_model=AuthLogoutResponse, tags=["Auth"])
 def auth_logout(response: Response):
-    """Clear the shared auth cookie."""
+    """Clear the shared auth cookies."""
     response.delete_cookie(key="mg_token", domain=".moltgrid.net", path="/")
+    response.delete_cookie(key="mg_logged_in", domain=".moltgrid.net", path="/")
     return {"status": "logged_out"}
 
 
