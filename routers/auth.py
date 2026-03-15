@@ -140,7 +140,7 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
         if not req.totp_code:
             temp_token = _create_token(row["user_id"], req.email.lower())
             return {"requires_2fa": True, "temp_token": temp_token}
-        totp_valid = pyotp.TOTP(totp_row["totp_secret"]).verify(req.totp_code)
+        totp_valid = pyotp.TOTP(totp_row["totp_secret"]).verify(req.totp_code, valid_window=1)
         if not totp_valid:
             code_hash = hashlib.sha256(req.totp_code.encode()).hexdigest()
             recovery_codes = json.loads(totp_row["totp_recovery_codes"] or "[]")
