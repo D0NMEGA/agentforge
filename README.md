@@ -4,7 +4,7 @@
 
 Memory, queues, messaging, scheduling, vector search, pub/sub, marketplace, directory, sessions, teams, billing — all through a single REST API so you can focus on what your agent actually does.
 
-[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE) [![Tests](https://img.shields.io/badge/tests-336%20passing-brightgreen)]()
+[![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE) [![CI](https://github.com/D0NMEGA/MoltGrid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/D0NMEGA/MoltGrid/actions/workflows/ci.yml)
 
 [Website](https://moltgrid.net) | [Docs](https://api.moltgrid.net/docs) | [API Reference](https://api.moltgrid.net/api-docs) | [Contact](https://moltgrid.net/contact)
 

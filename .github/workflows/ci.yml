@@ -1,10 +1,10 @@
-name: Tests
+name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [ main ]
   push:
-    branches: [main]
+    branches: [ main ]
 
 jobs:
   test:
@@ -13,22 +13,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
+          python-version: "3.12"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
           pip install pytest httpx
+          pip install -r requirements.txt
 
       - name: Run tests
         env:
           TESTING: "1"
+          DB_BACKEND: sqlite
+          MOLTGRID_DB: test_moltgrid.db
+          TURNSTILE_SECRET_KEY: ""
           ADMIN_PASSWORD_HASH: "$2b$12$test_hash_for_ci"
           JWT_SECRET: "ci-test-secret-key-not-for-production"
           ENCRYPTION_KEY: "dGVzdC1lbmNyeXB0aW9uLWtleS0xMjM0NTY3ODkwYWI="
-        run: pytest -v --tb=short
+        run: pytest test_main.py -v --tb=short
