@@ -1,0 +1,24 @@
+meta {
+  name: Create Schedule
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/v1/schedules
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "cron": "0 * * * *",
+    "action": "heartbeat",
+    "payload": {}
+  }
+}

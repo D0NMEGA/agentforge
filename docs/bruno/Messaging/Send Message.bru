@@ -1,0 +1,23 @@
+meta {
+  name: Send Message
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/v1/relay/send
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "to_agent": "{{target_agent_id}}",
+    "content": "Hello!"
+  }
+}

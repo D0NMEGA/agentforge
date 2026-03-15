@@ -1,0 +1,25 @@
+meta {
+  name: Submit Job
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{base_url}}/v1/queue/submit
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "queue_name": "tasks",
+    "payload": {
+      "action": "analyze"
+    }
+  }
+}

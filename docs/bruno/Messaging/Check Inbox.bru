@@ -1,0 +1,15 @@
+meta {
+  name: Check Inbox
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/v1/relay/inbox
+  body: none
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+}

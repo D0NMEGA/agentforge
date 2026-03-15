@@ -1,0 +1,22 @@
+meta {
+  name: Claim Job
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{base_url}}/v1/queue/claim
+  body: json
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "queue_name": "tasks"
+  }
+}

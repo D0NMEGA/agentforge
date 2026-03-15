@@ -1,0 +1,15 @@
+meta {
+  name: Get Memory
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{base_url}}/v1/memory/task
+  body: none
+  auth: none
+}
+
+headers {
+  X-API-Key: {{api_key}}
+}
