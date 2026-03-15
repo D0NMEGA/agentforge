@@ -16,13 +16,13 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /opt/moltgrid
+            cd /opt/moltgrid-staging
             git fetch origin
             git checkout staging
             git reset --hard origin/staging
             source venv/bin/activate
             pip install -r requirements.txt --quiet --no-cache-dir
             systemctl restart moltgrid-staging
-            sleep 5
+            sleep 20
             curl -sf http://127.0.0.1:8001/v1/health || exit 1
             echo "Staging deploy complete."
