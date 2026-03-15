@@ -19,11 +19,13 @@ from helpers import get_agent_id, _track_event, _log_audit, _encrypt
 from models import (
     IntegrationCreateRequest, MoltBookEventRequest,
     MoltBookRegisterRequest, OnboardingResponse,
+    IntegrationCreateResponse, IntegrationListResponse,
+    MoltBookEventResponse, MoltBookRegisterResponse, MoltBookFeedResponse,
 )
 
 router = APIRouter()
 
-@router.post("/v1/agents/{agent_id}/integrations", tags=["Integrations"])
+@router.post("/v1/agents/{agent_id}/integrations", response_model=IntegrationCreateResponse, tags=["Integrations"])
 def integration_create(agent_id: str, req: IntegrationCreateRequest, caller_id: str = Depends(get_agent_id)):
     """Link an external platform to this agent. Agent must own itself (caller == agent_id)."""
     if caller_id != agent_id:
@@ -43,7 +45,7 @@ def integration_create(agent_id: str, req: IntegrationCreateRequest, caller_id: 
     return {"id": integration_id, "agent_id": agent_id, "platform": req.platform,
             "status": req.status, "created_at": now}
 
-@router.get("/v1/agents/{agent_id}/integrations", tags=["Integrations"])
+@router.get("/v1/agents/{agent_id}/integrations", response_model=IntegrationListResponse, tags=["Integrations"])
 def integration_list(agent_id: str, caller_id: str = Depends(get_agent_id)):
     """List all platform integrations linked to an agent. Caller must be the agent."""
     if caller_id != agent_id:
@@ -71,7 +73,7 @@ class MoltBookEventRequest(BaseModel):
     moltbook_url: Optional[str] = Field(None, max_length=512, description="Deep link to the MoltBook post")
     metadata: Optional[dict] = Field(None, description="Additional event metadata")
 
-@router.post("/v1/moltbook/events", tags=["Integrations"])
+@router.post("/v1/moltbook/events", response_model=MoltBookEventResponse, tags=["Integrations"])
 def moltbook_ingest_event(req: MoltBookEventRequest, agent_id: str = Depends(get_agent_id)):
     """Ingest a MoltBook social action (post, reply, upvote) as an analytics_event with source='moltbook'."""
     event_id = f"evt_{uuid.uuid4().hex[:16]}"
@@ -99,7 +101,7 @@ class MoltBookRegisterRequest(BaseModel):
 
 
 # TODO: Add IP-based rate limiting in Phase 8
-@router.post("/v1/moltbook/register", tags=["Integrations"])
+@router.post("/v1/moltbook/register", response_model=MoltBookRegisterResponse, tags=["Integrations"])
 def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
     """Auto-provision a MoltGrid agent for a new MoltBook user. Requires X-Service-Key header."""
     import main as _m
@@ -133,7 +135,7 @@ def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(
     return {"agent_id": agent_id, "api_key": raw_key, "display_name": req.display_name}
 
 
-@router.get("/v1/moltbook/feed", tags=["Integrations"])
+@router.get("/v1/moltbook/feed", response_model=MoltBookFeedResponse, tags=["Integrations"])
 def moltbook_feed():
     """Return last 20 moltbook-sourced analytics events as a social feed. Public endpoint."""
     with get_db() as db:
@@ -269,7 +271,7 @@ def onboarding_status(agent_id: str = Depends(get_agent_id)):
     return OnboardingResponse(**result)
 
 
-GUIDE_PLATFORMS = {"quickstart", "python-sdk", "typescript-sdk", "webhooks", "mcp"}
+GUIDE_PLATFORMS = {"quickstart", "python-sdk", "typescript-sdk", "webhooks", "mcp", "langgraph", "crewai", "openai"}
 
 @router.get("/v1/guides/{platform}", tags=["Documentation"])
 def get_guide(platform: str):
