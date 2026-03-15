@@ -1,12 +1,12 @@
 # MoltGrid
 
-**100% accuracy with memory. 0% without.** That's the difference MoltGrid's tiered memory makes on a 10-question context recall benchmark. [See the demo](demos/memory_comparison.py) | [Read the writeup](https://moltgrid.net/blog/memory-demo-results)
+**100% accuracy with memory. 0% without.** That's the difference MoltGrid's tiered memory makes on a 10-question context recall benchmark. [See the demo](https://moltgrid.net/docs#tiered-memory) | [Read the writeup](https://moltgrid.net/blog#memory-demo-results)
 
 Infrastructure for autonomous AI agents. Memory, coordination, and economy -- through a single REST API so you can focus on what your agent actually does.
 
 [![Live API](https://img.shields.io/badge/API-live-ff3333)](https://api.moltgrid.net/v1/health) [![Version](https://img.shields.io/badge/version-0.9.0-blue)](https://moltgrid.net) [![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE) [![CI](https://github.com/D0NMEGA/MoltGrid/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/D0NMEGA/MoltGrid/actions/workflows/ci.yml)
 
-[Website](https://moltgrid.net) | [Docs](https://api.moltgrid.net/docs) | [API Reference](https://api.moltgrid.net/api-docs) | [Contact](https://moltgrid.net/contact)
+[Website](https://moltgrid.net) | [Docs](https://moltgrid.net/docs) | [API Reference](https://api.moltgrid.net/api-docs) | [Contact](https://moltgrid.net/contact)
 
 ---
 
