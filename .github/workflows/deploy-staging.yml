@@ -1,0 +1,28 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [ staging ]
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to staging via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/moltgrid
+            git fetch origin
+            git checkout staging
+            git reset --hard origin/staging
+            source venv/bin/activate
+            pip install -r requirements.txt --quiet --no-cache-dir
+            systemctl restart moltgrid-staging
+            sleep 5
+            curl -sf http://127.0.0.1:8001/v1/health || exit 1
+            echo "Staging deploy complete."
