@@ -66,7 +66,87 @@ async def lifespan(app):
 
 # ─── App ─────────────────────────────────────────────────────────────────────
 
+tags_metadata = [
+    {
+        "name": "Admin",
+        "description": "Admin routes (20 routes)."
+    },
+    {
+        "name": "Auth",
+        "description": "Auth + User notification routes (14 routes)."
+    },
+    {
+        "name": "Billing",
+        "description": "Billing + Templates routes (7 routes)."
+    },
+    {
+        "name": "User Dashboard",
+        "description": "User Dashboard routes (33 routes)."
+    },
+    {
+        "name": "Directory",
+        "description": "Directory routes (13 routes)."
+    },
+    {
+        "name": "Events",
+        "description": "Events routes (4 routes)."
+    },
+    {
+        "name": "Integrations",
+        "description": "Integrations + Onboarding routes (10 routes)."
+    },
+    {
+        "name": "Marketplace",
+        "description": "Marketplace + Testing routes (10 routes)."
+    },
+    {
+        "name": "Memory",
+        "description": "Memory routes (6 routes)."
+    },
+    {
+        "name": "Orgs",
+        "description": "Orgs routes (8 routes)."
+    },
+    {
+        "name": "Pub/Sub",
+        "description": "Pub/Sub routes (5 routes)."
+    },
+    {
+        "name": "Queue",
+        "description": "Queue routes (8 routes)."
+    },
+    {
+        "name": "Relay",
+        "description": "Relay routes (4 routes)."
+    },
+    {
+        "name": "Schedules",
+        "description": "Schedules routes (5 routes)."
+    },
+    {
+        "name": "Sessions",
+        "description": "Sessions routes (6 routes)."
+    },
+    {
+        "name": "Documentation",
+        "description": "System + Documentation + Obstacle Course routes (~21 routes)."
+    },
+    {
+        "name": "tiered-memory",
+        "description": "Tiered Memory routes (3 routes) -- composition layer over sessions, memory, and vector_memory."
+    },
+    {
+        "name": "Vector Memory",
+        "description": "Vector Memory + Shared Memory routes (10 routes)."
+    },
+    {
+        "name": "Webhooks",
+        "description": "Webhooks routes (4 routes)."
+    }
+]
+
 app = FastAPI(
+    openapi_tags=tags_metadata,
     title="MoltGrid",
     description="Open-source toolkit API for autonomous agents. "
     "Persistent memory, task queues, message relay, and text utilities.",
@@ -155,10 +235,12 @@ init_db()
 from routers import auth, dashboard, billing, memory, queue, relay          # noqa: E402
 from routers import webhooks, schedules, vector, directory, marketplace     # noqa: E402
 from routers import pubsub, integrations, sessions, events, orgs, admin, system  # noqa: E402
+from routers import tiered_memory                                           # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
 app.include_router(billing.router)
+app.include_router(tiered_memory.router)
 app.include_router(memory.router)
 app.include_router(queue.router)
 app.include_router(relay.router)
