@@ -129,8 +129,9 @@ async def events_ws(websocket: WebSocket, api_key: str = Query(None)):
 
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        from config import logger
+        logger.warning("events_ws error: %s", type(e).__name__)
 
 
 @router.websocket("/v1/user/events/ws")
@@ -222,12 +223,20 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
                     pass
                 elif msg.get("type") == "ack" and msg.get("event_ids"):
                     eids = msg["event_ids"]
-                    placeholders = ",".join("?" * len(eids))
+                    # Validate: must be a list of strings, max 50 items
+                    if not isinstance(eids, list) or len(eids) > 50:
+                        continue
+                    eids = [str(e) for e in eids if isinstance(e, (str, int))][:50]
+                    if not eids or not agent_ids:
+                        continue
+                    # Ownership check: only ack events belonging to this user's agents
+                    eid_ph = ",".join("?" * len(eids))
+                    aid_ph = ",".join("?" * len(agent_ids))
                     with get_db() as db:
                         db.execute(
                             "UPDATE agent_events SET acknowledged=1 "
-                            f"WHERE event_id IN ({placeholders})",
-                            eids,
+                            f"WHERE event_id IN ({eid_ph}) AND agent_id IN ({aid_ph})",
+                            eids + agent_ids,
                         )
                         db.commit()
             except asyncio.TimeoutError:
@@ -237,5 +246,6 @@ async def user_events_ws(websocket: WebSocket, token: str = Query(None)):
 
     except WebSocketDisconnect:
         pass
-    except Exception:
-        pass
+    except Exception as e:
+        from config import logger
+        logger.warning("events_ws error: %s", type(e).__name__)

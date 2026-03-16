@@ -254,48 +254,41 @@ def directory_search(
 ):
     """Search the agent directory with filters. No auth required."""
     now = datetime.now(timezone.utc).isoformat()
-    conditions = ["public=1"]
+    conditions = ["a.public=1"]
     params: list = []
     if q:
-        conditions.append("(name LIKE ? OR description LIKE ? OR capabilities LIKE ? OR skills LIKE ? OR interests LIKE ?)")
+        conditions.append("(a.name LIKE ? OR a.description LIKE ? OR a.capabilities LIKE ? OR a.skills LIKE ? OR a.interests LIKE ?)")
         q_like = f"%{q}%"
         params.extend([q_like, q_like, q_like, q_like, q_like])
     if capability:
-        conditions.append("capabilities LIKE ?")
+        conditions.append("a.capabilities LIKE ?")
         params.append(f"%{capability}%")
     if skill:
-        conditions.append("skills LIKE ?")
+        conditions.append("a.skills LIKE ?")
         params.append(f"%{skill}%")
     if interest:
-        conditions.append("interests LIKE ?")
+        conditions.append("a.interests LIKE ?")
         params.append(f"%{interest}%")
     if available is True:
-        conditions.append("available=1 AND (busy_until IS NULL OR busy_until < ?)")
+        conditions.append("a.available=1 AND (a.busy_until IS NULL OR a.busy_until < ?)")
         params.append(now)
     if online is True:
-        conditions.append("heartbeat_status='online' AND heartbeat_at IS NOT NULL "
-                          "AND datetime(heartbeat_at) >= datetime(?, '-' || (COALESCE(heartbeat_interval,60)*2) || ' seconds')")
+        conditions.append("a.heartbeat_status='online' AND a.heartbeat_at IS NOT NULL "
+                          "AND datetime(a.heartbeat_at) >= datetime(?, '-' || (COALESCE(a.heartbeat_interval,60)*2) || ' seconds')")
         params.append(now)
     if last_seen_before:
-        conditions.append("heartbeat_at IS NOT NULL AND heartbeat_at < ?")
+        conditions.append("a.heartbeat_at IS NOT NULL AND a.heartbeat_at < ?")
         params.append(last_seen_before)
     if min_reputation > 0:
-        conditions.append("reputation >= ?")
+        conditions.append("a.reputation >= ?")
         params.append(min_reputation)
     where = " AND ".join(conditions)
     params.append(limit)
     cols = ("a.agent_id, a.name, a.description, a.capabilities, a.skills, a.interests, a.available, a.looking_for, a.busy_until, "
             "a.reputation, a.credits, a.heartbeat_status, a.heartbeat_at, a.created_at, a.owner_id, u.display_name AS owner_name")
-    # Prefix conditions with table alias
-    where_aliased = where.replace("public=", "a.public=").replace("available=", "a.available=").replace(
-        "heartbeat_status=", "a.heartbeat_status=").replace("heartbeat_at", "a.heartbeat_at").replace(
-        "heartbeat_interval", "a.heartbeat_interval").replace("busy_until", "a.busy_until").replace(
-        "reputation", "a.reputation").replace("name LIKE", "a.name LIKE").replace(
-        "description LIKE", "a.description LIKE").replace("capabilities LIKE", "a.capabilities LIKE").replace(
-        "skills LIKE", "a.skills LIKE").replace("interests LIKE", "a.interests LIKE")
     with get_db() as db:
         rows = db.execute(
-            f"SELECT {cols} FROM agents a LEFT JOIN users u ON a.owner_id = u.user_id WHERE {where_aliased} ORDER BY a.reputation DESC, a.created_at DESC LIMIT ?",
+            f"SELECT {cols} FROM agents a LEFT JOIN users u ON a.owner_id = u.user_id WHERE {where} ORDER BY a.reputation DESC, a.created_at DESC LIMIT ?",
             params
         ).fetchall()
     agents = []
