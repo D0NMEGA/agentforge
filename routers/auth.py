@@ -42,6 +42,8 @@ from models import (
 )
 
 import secrets
+import re
+import httpx as _httpx
 
 router = APIRouter()
 
@@ -426,6 +428,106 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
         "api_key": new_key,
         "message": "Store your new API key securely. The old key is now invalid.",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GOOGLE OAUTH
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/v1/auth/google", tags=["Auth"])
+def auth_google_redirect():
+    """Redirect user to Google OAuth consent screen."""
+    from config import GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(503, "Google OAuth not configured")
+    state = secrets.token_hex(16)
+    params = urllib.parse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "offline",
+        "state": state,
+        "prompt": "consent",
+    })
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+
+@router.get("/v1/auth/google/callback", tags=["Auth"])
+def auth_google_callback(code: str = None, error: str = None):
+    """Handle Google OAuth callback. Exchange code for tokens, create or login user."""
+    from config import GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+    from fastapi.responses import RedirectResponse
+
+    if error or not code:
+        return RedirectResponse("https://moltgrid.net/dashboard#/login?error=google_denied")
+
+    # Exchange code for tokens
+    try:
+        token_resp = _httpx.post("https://oauth2.googleapis.com/token", data={
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        }, timeout=10)
+        token_data = token_resp.json()
+        if "error" in token_data:
+            return RedirectResponse("https://moltgrid.net/dashboard#/login?error=google_token_failed")
+    except Exception:
+        return RedirectResponse("https://moltgrid.net/dashboard#/login?error=google_network")
+
+    # Get user info from Google
+    try:
+        userinfo_resp = _httpx.get("https://www.googleapis.com/oauth2/v2/userinfo", headers={
+            "Authorization": f"Bearer {token_data['access_token']}"
+        }, timeout=10)
+        userinfo = userinfo_resp.json()
+        google_email = userinfo.get("email", "").lower()
+        google_name = userinfo.get("name", "")
+        if not google_email:
+            return RedirectResponse("https://moltgrid.net/dashboard#/login?error=google_no_email")
+    except Exception:
+        return RedirectResponse("https://moltgrid.net/dashboard#/login?error=google_userinfo_failed")
+
+    # Check if user exists
+    with get_db() as db:
+        existing = db.execute("SELECT user_id, totp_enabled FROM users WHERE email = ?", (google_email,)).fetchone()
+
+        if existing:
+            user_id = existing["user_id"]
+            # If 2FA is enabled, redirect to login page with email pre-filled so they enter TOTP
+            if existing["totp_enabled"]:
+                return RedirectResponse(f"https://moltgrid.net/dashboard#/login?email={urllib.parse.quote(google_email)}&needs_2fa=1")
+        else:
+            # Create new user with random password (they use Google to log in)
+            user_id = f"user_{uuid.uuid4().hex[:12]}"
+            now = datetime.now(timezone.utc).isoformat()
+            random_pw = secrets.token_hex(32)
+            pw_hash = _bcrypt.hashpw(random_pw.encode(), _bcrypt.gensalt()).decode()
+            # Generate username from Google name
+            username = re.sub(r'[^A-Za-z0-9_]', '', google_name.replace(' ', '_'))[:30] or f"user_{user_id[-8:]}"
+            # Check username uniqueness
+            name_exists = db.execute("SELECT user_id FROM users WHERE LOWER(display_name) = LOWER(?)", (username,)).fetchone()
+            if name_exists:
+                username = f"{username}_{secrets.token_hex(2)}"
+            db.execute(
+                "INSERT INTO users (user_id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
+                (user_id, google_email, pw_hash, username, now)
+            )
+            _track_event("user.signup", user_id=user_id, metadata={"method": "google"})
+
+    # Issue JWT and redirect to dashboard
+    token = _create_token(user_id, google_email)
+    _track_event("user.login", user_id=user_id, metadata={"method": "google"})
+
+    # Set cookies and redirect
+    response = RedirectResponse("https://moltgrid.net/dashboard#/agents")
+    response.set_cookie(key="mg_token", value=token, domain=".moltgrid.net", path="/", max_age=7*86400, secure=True, httponly=True, samesite="lax")
+    dname = username if not existing else google_email.split("@")[0]
+    response.set_cookie(key="mg_logged_in", value=urllib.parse.quote(dname), domain=".moltgrid.net", path="/", max_age=7*86400, secure=True, samesite="lax")
+    return response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

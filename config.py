@@ -78,6 +78,11 @@ SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
     logger.warning("SMTP environment variables not set — contact form will be disabled.")
 
+# Google OAuth
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "https://api.moltgrid.net/v1/auth/google/callback")
+
 # Cloudflare Turnstile CAPTCHA
 TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "")
 
