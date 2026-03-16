@@ -20,7 +20,7 @@ from helpers import (
     _check_auth_rate_limit, _decrypt, _encrypt, _fire_webhooks,
 )
 from pydantic import BaseModel
-from models import AdminLoginRequest
+from models import AdminLoginRequest, AdminEmailRequest
 
 router = APIRouter()
 
@@ -559,6 +559,29 @@ def admin_contact(
         rows = db.execute("SELECT * FROM contact_submissions ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset)).fetchall()
         total = db.execute("SELECT COUNT(*) as c FROM contact_submissions").fetchone()["c"]
     return {"submissions": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
+
+@router.post("/admin/api/email", tags=["Admin"])
+def admin_email(req: AdminEmailRequest, _: bool = Depends(_verify_admin_session)):
+    """Preview or send a branded email from the admin panel."""
+    from helpers import _branded_email, _queue_email, _email_from
+
+    rendered = _branded_email(req.title, req.body_html)
+
+    if req.send:
+        _queue_email(req.to_email, req.subject, rendered, req.from_category)
+        return {"status": "queued", "preview": rendered, "from": _email_from(req.from_category)}
+
+    return {"status": "preview", "preview": rendered, "from": _email_from(req.from_category)}
+
+@router.get("/admin/api/emails", tags=["Admin"])
+def admin_email_history(_: bool = Depends(_verify_admin_session)):
+    """List recent emails from the queue."""
+    with get_db() as db:
+        emails = db.execute(
+            "SELECT id, to_email, subject, status, from_display, created_at, sent_at "
+            "FROM email_queue ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+    return {"emails": [dict(e) for e in emails]}
 
 @router.get("/admin/login", response_class=HTMLResponse, tags=["Admin"])
 def admin_login_page():

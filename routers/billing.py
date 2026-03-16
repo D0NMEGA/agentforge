@@ -168,7 +168,7 @@ async def stripe_webhook(request: Request):
                 f'<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Dashboard</a>'
                 f'</p>'
             )
-            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", _branded_email(f"Your MoltGrid {_checkout_tier} plan is now active", confirm_body))
+            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", _branded_email(f"Your MoltGrid {_checkout_tier} plan is now active", confirm_body), "transactional")
     return {"received": True}
 
 @router.get("/v1/billing/status", tags=["Billing"], response_model=BillingStatusResponse)

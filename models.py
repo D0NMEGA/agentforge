@@ -440,6 +440,14 @@ class PubSubPublishRequest(BaseModel):
 class AdminLoginRequest(BaseModel):
     password: str
 
+class AdminEmailRequest(BaseModel):
+    from_category: str = Field("transactional", description="transactional|support|marketing|founder")
+    to_email: str = Field(..., max_length=256)
+    subject: str = Field(..., max_length=256)
+    title: str = Field(..., max_length=256)
+    body_html: str = Field(...)
+    send: bool = Field(False, description="If true, actually send. If false, just preview.")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SESSION MODELS

@@ -979,6 +979,17 @@ def _init_db_sqlite(conn):
     except Exception:
         pass
 
+    # Migrate email_queue table — add from_display for per-email FROM routing
+    try:
+        eq_existing = _get_existing_columns(conn, "email_queue")
+        for col, typedef in [
+            ("from_display", "TEXT"),
+        ]:
+            if col not in eq_existing:
+                conn.execute(f"ALTER TABLE email_queue ADD COLUMN {col} {typedef}")
+    except Exception:
+        pass
+
 
 def _init_db_postgres(conn):
     """PostgreSQL schema initialization — CREATE TABLE IF NOT EXISTS with PG types.
@@ -1228,7 +1239,8 @@ def _init_db_postgres(conn):
             status TEXT DEFAULT 'pending',
             created_at TEXT NOT NULL,
             sent_at TEXT,
-            error TEXT
+            error TEXT,
+            from_display TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS sessions (
             session_id TEXT PRIMARY KEY,

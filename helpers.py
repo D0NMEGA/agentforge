@@ -193,7 +193,7 @@ def _check_usage_quota(db, agent_id: str):
 <a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Plan</a>
 </p>
 '''
-            _queue_email(owner["email"], "You're approaching your API limit", _branded_email("Approaching your API limit", warning_body))
+            _queue_email(owner["email"], "You're approaching your API limit", _branded_email("Approaching your API limit", warning_body), "transactional")
 
     if limit is not None and owner["usage_count"] >= limit:
         # Send quota exceeded email (only once when hitting limit)
@@ -210,7 +210,7 @@ def _check_usage_quota(db, agent_id: str):
 <a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Now</a>
 </p>
 '''
-            _queue_email(owner["email"], "API limit reached -- your agents may be affected", _branded_email("API limit reached", exceeded_body))
+            _queue_email(owner["email"], "API limit reached -- your agents may be affected", _branded_email("API limit reached", exceeded_body), "transactional")
         _track_event("quota.exceeded", user_id=owner["user_id"], metadata={"tier": tier, "limit": limit})
         raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
 
@@ -560,9 +560,9 @@ def _queue_email(to_email: str, subject: str, body_html: str, category: str = "t
     try:
         conn = get_standalone_conn()
         conn.execute(
-            "INSERT INTO email_queue (id, to_email, subject, body_html, status, created_at) "
-            "VALUES (?, ?, ?, ?, 'pending', ?)",
-            (email_id, to_email, subject, body_html, now)
+            "INSERT INTO email_queue (id, to_email, subject, body_html, status, created_at, from_display) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+            (email_id, to_email, subject, body_html, now, from_display)
         )
         conn.commit()
         logger.info(f"Queued email {email_id} to {to_email}: {subject} (from: {from_display})")
@@ -574,7 +574,7 @@ def _queue_email(to_email: str, subject: str, body_html: str, category: str = "t
     return email_id
 
 
-def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
+def _send_email_smtp(to_email: str, subject: str, body_html: str, from_display: str = None) -> bool:
     """Send email via SMTP. Returns True if successful, False otherwise."""
     if not SMTP_FROM or not SMTP_TO or not SMTP_PASSWORD:
         logger.warning("SMTP not configured, skipping email send")
@@ -584,7 +584,7 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str) -> bool:
         from email.utils import formataddr
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = formataddr(("MoltGrid", SMTP_FROM))
+        msg["From"] = from_display or formataddr(("MoltGrid", SMTP_FROM))
         msg["To"] = to_email
 
         # Add HTML part
@@ -1002,7 +1002,7 @@ def _run_email_tick():
     """Process up to 10 pending emails."""
     with get_db() as db:
         pending = db.execute(
-            "SELECT id, to_email, subject, body_html FROM email_queue "
+            "SELECT id, to_email, subject, body_html, from_display FROM email_queue "
             "WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
         ).fetchall()
 
@@ -1011,8 +1011,9 @@ def _run_email_tick():
             to_email = email["to_email"]
             subject = email["subject"]
             body_html = email["body_html"]
+            from_display = email["from_display"] if "from_display" in email.keys() else None
 
-            success = _send_email_smtp(to_email, subject, body_html)
+            success = _send_email_smtp(to_email, subject, body_html, from_display)
             now = datetime.now(timezone.utc).isoformat()
 
             if success:
