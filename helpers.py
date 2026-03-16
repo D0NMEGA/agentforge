@@ -591,10 +591,16 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str, from_display: 
         html_part = MIMEText(body_html, "html")
         msg.attach(html_part)
 
-        # Send via SMTP (Hostinger / configurable provider)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-            server.login(SMTP_USER, SMTP_PASSWORD)
-            server.send_message(msg)
+        # Send via SMTP with STARTTLS (port 587) or SSL (port 465)
+        if SMTP_PORT == 587:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+                server.starttls()
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+                server.login(SMTP_USER, SMTP_PASSWORD)
+                server.send_message(msg)
 
         logger.info(f"Sent email to {to_email}: {subject}")
         return True
