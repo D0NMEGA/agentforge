@@ -4241,15 +4241,16 @@ class TestTOTP2FA:
 class TestAgentTemplates:
     """Tests for agent templates feature (BL-04)."""
 
-    def test_list_templates_returns_4(self):
-        """GET /v1/templates returns all 4 seeded templates."""
+    def test_list_templates_returns_5(self):
+        """GET /v1/templates returns all 5 seeded templates."""
         r = client.get("/v1/templates")
         assert r.status_code == 200
         body = r.json()
         assert "templates" in body
-        assert len(body["templates"]) == 4
+        assert len(body["templates"]) == 5
         ids = {t["template_id"] for t in body["templates"]}
         assert "tmpl_openclaw_social" in ids
+        assert "tmpl_openclaw" in ids
         assert "tmpl_worker" in ids
         assert "tmpl_research" in ids
         assert "tmpl_customer_service" in ids
