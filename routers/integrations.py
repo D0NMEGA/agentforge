@@ -116,8 +116,8 @@ def moltbook_register(req: MoltBookRegisterRequest, x_service_key: str = Header(
         ).fetchone()
     if existing:
         raise HTTPException(409, "MoltBook user already registered")
-    agent_id = f"af_{uuid.uuid4().hex[:12]}"
-    raw_key = f"af_{secrets.token_hex(24)}"
+    agent_id = f"agent_{uuid.uuid4().hex[:12]}"
+    raw_key = f"mg_{secrets.token_hex(24)}"
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
     integration_id = f"int_{uuid.uuid4().hex[:16]}"
     with get_db() as db:
