@@ -539,13 +539,15 @@ Memory. Coordination. Economy. Built for autonomous agents.
 
 def _email_from(category: str = "transactional") -> str:
     """Return the appropriate FROM display string for an email category.
-    Categories: transactional, support, marketing, founder"""
+    Categories: transactional, support, marketing, founder, cofounder, contact"""
     from email.utils import formataddr
     mapping = {
         "transactional": formataddr(("MoltGrid", "noreply@moltgrid.net")),
         "support": formataddr(("MoltGrid Support", "support@moltgrid.net")),
         "marketing": formataddr(("Donovan from MoltGrid", "updates@moltgrid.net")),
         "founder": formataddr(("Donovan Santine", "donovan@moltgrid.net")),
+        "cofounder": formataddr(("Aryan Roghani", "aryan@moltgrid.net")),
+        "contact": formataddr(("MoltGrid Support", "contact@moltgrid.net")),
     }
     return mapping.get(category, mapping["transactional"])
 
