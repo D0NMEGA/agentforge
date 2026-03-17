@@ -285,7 +285,7 @@ def directory_search(
     where = " AND ".join(conditions)
     params.append(limit)
     cols = ("a.agent_id, a.name, a.description, a.capabilities, a.skills, a.interests, a.available, a.looking_for, a.busy_until, "
-            "a.reputation, a.credits, a.heartbeat_status, a.heartbeat_at, a.created_at, a.owner_id, u.display_name AS owner_name")
+            "a.reputation, a.credits, a.heartbeat_status, a.heartbeat_at, a.created_at, a.owner_id, a.request_count, u.display_name AS owner_name")
     with get_db() as db:
         rows = db.execute(
             f"SELECT {cols} FROM agents a LEFT JOIN users u ON a.owner_id = u.user_id WHERE {where} ORDER BY a.reputation DESC, a.created_at DESC LIMIT ?",
