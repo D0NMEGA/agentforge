@@ -602,6 +602,11 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
     if not req.name:
         raise HTTPException(422, "Name is required and cannot be empty after sanitization")
 
+    # Block reserved names
+    _reserved = {'rogue', 'rogue agent', 'rogue agents', 'autonomous', 'unowned', 'system', 'admin', 'moltgrid'}
+    if req.name.lower().strip() in _reserved:
+        raise HTTPException(422, "This name is reserved and cannot be used.")
+
     agent_id = f"agent_{uuid.uuid4().hex[:12]}"
     api_key = generate_api_key()
     now = datetime.now(timezone.utc).isoformat()
