@@ -315,7 +315,7 @@ class QueueFailRequest(BaseModel):
 class RelayMessage(BaseModel):
     to_agent: str = Field(..., description="Recipient agent_id")
     channel: str = Field("direct", max_length=64)
-    payload: str = Field(..., max_length=10_000)
+    payload: str = Field(..., min_length=1, max_length=10_000)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -334,7 +334,7 @@ class TextProcessRequest(BaseModel):
 class ScheduledTaskRequest(BaseModel):
     cron_expr: str = Field(..., max_length=128, description="Cron expression (5-field: min hour dom mon dow)")
     queue_name: str = Field("default", max_length=64)
-    payload: str = Field(..., max_length=MAX_QUEUE_PAYLOAD_SIZE)
+    payload: str = Field(..., min_length=1, max_length=MAX_QUEUE_PAYLOAD_SIZE)
     priority: int = Field(0, ge=0, le=10)
 
 class ScheduledTaskResponse(BaseModel):
@@ -353,7 +353,7 @@ class ScheduledTaskResponse(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class VectorUpsertRequest(BaseModel):
-    key: str = Field(..., max_length=256)
+    key: str = Field(..., min_length=1, max_length=256)
     text: str = Field(..., max_length=10000, description="Text to embed")
     namespace: str = Field("default", max_length=64)
     metadata: Optional[dict] = Field(None, description="Optional metadata (stored as JSON)")
@@ -373,7 +373,7 @@ class VectorSearchRequest(BaseModel):
 
 class SharedMemorySetRequest(BaseModel):
     namespace: str = Field(..., max_length=64, description="Public namespace name")
-    key: str = Field(..., max_length=256)
+    key: str = Field(..., min_length=1, max_length=256)
     value: str = Field(..., max_length=MAX_MEMORY_VALUE_SIZE)
     description: Optional[str] = Field(None, max_length=256, description="Human-readable description of this entry")
     ttl_seconds: Optional[int] = Field(None, ge=60, le=2592000)
@@ -451,7 +451,7 @@ class PubSubSubscribeRequest(BaseModel):
 
 class PubSubPublishRequest(BaseModel):
     channel: str = Field(..., min_length=1, max_length=128, description="Channel to publish to")
-    payload: str = Field(..., max_length=50_000, description="Message payload")
+    payload: str = Field(..., min_length=1, max_length=50_000, description="Message payload")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

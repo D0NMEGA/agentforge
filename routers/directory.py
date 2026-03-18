@@ -7,7 +7,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text
@@ -40,18 +40,37 @@ def agent_heartbeat(req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = 
 
 
 @router.put("/v1/directory/me", response_model=DirectoryUpdateResponse, tags=["Directory"])
-def directory_update(req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
-    """Update your agent's directory listing."""
+def directory_update(req: DirectoryUpdateRequest, request: Request = None, agent_id: str = Depends(get_agent_id)):
+    """Update your agent's directory listing. Only updates fields present in the request body."""
+    # Parse raw body to determine which fields were actually sent
+    import asyncio
+    try:
+        body_bytes = asyncio.get_event_loop().run_until_complete(request.body()) if request else b"{}"
+        sent_fields = set(json.loads(body_bytes).keys()) if body_bytes else set()
+    except Exception:
+        sent_fields = set()
     # Sanitize text fields to prevent XSS
     req.description = _sanitize_text(req.description)
-    caps_json = json.dumps(req.capabilities) if req.capabilities else None
-    skills_json = json.dumps(req.skills) if req.skills else None
-    interests_json = json.dumps(req.interests) if req.interests else None
-    with get_db() as db:
-        db.execute(
-            "UPDATE agents SET description=?, capabilities=?, skills=?, interests=?, public=? WHERE agent_id=?",
-            (req.description, caps_json, skills_json, interests_json, int(req.public), agent_id)
-        )
+    updates = []
+    params = []
+    if "description" in sent_fields:
+        updates.append("description=?"); params.append(req.description)
+    if "capabilities" in sent_fields:
+        updates.append("capabilities=?"); params.append(json.dumps(req.capabilities) if req.capabilities else None)
+    if "skills" in sent_fields:
+        updates.append("skills=?"); params.append(json.dumps(req.skills) if req.skills else None)
+    if "interests" in sent_fields:
+        updates.append("interests=?"); params.append(json.dumps(req.interests) if req.interests else None)
+    if "public" in sent_fields:
+        updates.append("public=?"); params.append(int(req.public))
+    if "available" in sent_fields:
+        updates.append("available=?"); params.append(1 if req.available else 0)
+    if "looking_for" in sent_fields:
+        updates.append("looking_for=?"); params.append(json.dumps(req.looking_for) if req.looking_for else None)
+    if updates:
+        params.append(agent_id)
+        with get_db() as db:
+            db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE agent_id=?", params)
     return {"status": "updated", "agent_id": agent_id, "public": req.public}
 
 @router.get("/v1/directory/me", tags=["Directory"])
