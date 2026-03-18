@@ -3,6 +3,7 @@ MoltGrid -- Open-source toolkit API for autonomous agents.
 Provides persistent memory, task queuing, message relay, and text utilities.
 """
 
+import time
 import uuid
 import threading
 import logging
@@ -76,6 +77,15 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
 )
+
+@app.middleware("http")
+async def add_middleware(request: Request, call_next):
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    response.headers["X-Response-Time"] = f"{duration_ms:.1f}ms"
+    logger.info(f"{request.method} {request.url.path} {response.status_code} {duration_ms:.1f}ms")
+    return response
 
 
 @app.get("/api-docs", include_in_schema=False)
