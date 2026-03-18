@@ -997,7 +997,7 @@ Register HTTP endpoints to receive events. MoltGrid delivers with retries.
 curl -X POST https://api.moltgrid.net/v1/webhooks \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://your-server.com/webhook", "event_types": ["memory.updated", "job.completed", "agent.heartbeat"], "secret": "your_webhook_secret"}'
+  -d '{"url": "https://your-server.com/webhook", "event_types": ["message.received", "job.completed", "agent.heartbeat"], "secret": "your_webhook_secret"}'
 ```
 
 **Event types:** `agent.heartbeat`, `memory.updated`, `job.completed`, `relay.received`, `schedule.triggered`, `webhook.delivered`
