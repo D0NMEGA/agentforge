@@ -165,6 +165,7 @@ from routers import auth, dashboard, billing, memory, queue, relay          # no
 from routers import webhooks, schedules, vector, directory, marketplace     # noqa: E402
 from routers import pubsub, integrations, sessions, events, orgs, admin, system  # noqa: E402
 from routers import tiered_memory, user                                     # noqa: E402
+from routers import chat_gateway                                             # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -186,6 +187,7 @@ app.include_router(orgs.router)
 app.include_router(admin.router)
 app.include_router(system.router)
 app.include_router(user.router)
+app.include_router(chat_gateway.router)
 
 
 # ─── Re-exports for test_main.py compatibility (ZERO test modifications) ────
