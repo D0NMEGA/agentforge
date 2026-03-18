@@ -479,7 +479,7 @@ class SessionCreateRequest(BaseModel):
     max_tokens: int = Field(128000, ge=1000, le=1000000)
 
 class SessionAppendRequest(BaseModel):
-    role: str = Field(..., pattern="^(user|assistant|system)$")
+    role: str = Field(..., pattern="^(user|assistant|system|agent)$")
     content: str = Field(..., min_length=1, max_length=1000000)
 
 
@@ -1326,7 +1326,7 @@ class EventPollResponse(BaseModel):
 class TieredStoreEventRequest(BaseModel):
     session_id: str = Field(..., max_length=64)
     data: Any = Field(..., description="Event content -- string or any JSON-serializable dict")
-    role: str = Field("user", pattern="^(user|assistant|system)$")
+    role: str = Field("user", pattern="^(user|assistant|system|agent)$")
     persist: bool = Field(False, description="If True, also write to mid-term notes (Tier 2)")
     note_key: Optional[str] = Field(None, max_length=256, description="Key for mid-term note (required if persist=True)")
 

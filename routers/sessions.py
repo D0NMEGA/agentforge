@@ -110,7 +110,8 @@ def session_append(session_id: str, req: SessionAppendRequest, agent_id: str = D
         token_count = row["token_count"]
         max_tokens = row["max_tokens"]
 
-        new_msg = {"role": req.role, "content": req.content}
+        role = "assistant" if req.role == "agent" else req.role
+        new_msg = {"role": role, "content": req.content}
         messages.append(new_msg)
         token_count += _estimate_tokens(req.content)
 
