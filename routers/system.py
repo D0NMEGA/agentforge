@@ -120,7 +120,7 @@ def submit_contact(form: ContactForm):
 <p style="color:#e4e4ef;margin:0 0 4px;"><strong>Subject:</strong> {form.subject or "No subject"}</p>
 <p style="color:#e4e4ef;margin:0;white-space:pre-wrap;">{form.message}</p>
 </div>
-<p style="color:#7a7a92;font-size:13px;">If you need immediate help, check our <a href="https://api.moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">documentation</a>.</p>
+<p style="color:#7a7a92;font-size:13px;">If you need immediate help, check our <a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">documentation</a>.</p>
 '''
     _get_queue_email()(form.email, "We received your message | MoltGrid", _branded_email("Message Received", confirm_body), "support")
 

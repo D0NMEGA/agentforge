@@ -185,12 +185,12 @@ def _check_usage_quota(db, agent_id: str):
         if 80 <= usage_pct < 81:
             _track_event("quota.warning_80pct", user_id=owner["user_id"], metadata={"tier": tier, "usage_pct": round(usage_pct, 1)})
             warning_body = f'''
-<p style="color:#e4e4ef;">Your MoltGrid usage is at <strong>{usage_pct:.1f}%</strong> of your monthly quota.</p>
+<p style="color:#e4e4ef;">Heads up: your MoltGrid usage is at <strong>{usage_pct:.1f}%</strong> of your monthly quota.</p>
 <p style="color:#e4e4ef;"><strong>Current usage:</strong> {owner["usage_count"]:,} / {limit:,} API calls</p>
-<p style="color:#e4e4ef;"><strong>Tier:</strong> {tier}</p>
-<p style="color:#e4e4ef;">To avoid service interruption, consider upgrading your plan:</p>
-<p style="margin-top:20px;">
-<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Plan</a>
+<p style="color:#e4e4ef;"><strong>Plan:</strong> {tier.capitalize()}</p>
+<p style="color:#e4e4ef;">To keep your agents running without interruption, consider upgrading your plan.</p>
+<p style="margin-top:24px;text-align:center;">
+<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Upgrade Plan</a>
 </p>
 '''
             _queue_email(owner["email"], "You're approaching your API limit", _branded_email("Approaching your API limit", warning_body), "transactional")
@@ -199,18 +199,14 @@ def _check_usage_quota(db, agent_id: str):
         # Send quota exceeded email (only once when hitting limit)
         if owner["usage_count"] == limit and _should_send_notification(db, owner["user_id"], "quota_alerts"):
             exceeded_body = f'''
-<p style="color:#e4e4ef;">You've reached your monthly API call quota for the <strong>{tier}</strong> tier.</p>
+<p style="color:#e4e4ef;">You have reached your monthly API call quota for the <strong>{tier.capitalize()}</strong> plan.</p>
 <p style="color:#e4e4ef;"><strong>Limit:</strong> {limit:,} API calls per month</p>
-<p style="color:#e4e4ef;">Your agents will receive 429 errors until:</p>
-<ul style="color:#e4e4ef;padding-left:20px;">
-<li style="margin-bottom:8px;">Your quota resets at the start of next month, OR</li>
-<li style="margin-bottom:8px;">You upgrade to a higher tier</li>
-</ul>
-<p style="margin-top:20px;">
-<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Upgrade Now</a>
+<p style="color:#e4e4ef;">Your agents will receive errors until your quota resets at the start of next month, or you upgrade to a higher plan.</p>
+<p style="margin-top:24px;text-align:center;">
+<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Upgrade Now</a>
 </p>
 '''
-            _queue_email(owner["email"], "API limit reached -- your agents may be affected", _branded_email("API limit reached", exceeded_body), "transactional")
+            _queue_email(owner["email"], "API limit reached - your agents may be affected", _branded_email("API limit reached", exceeded_body), "transactional")
         _track_event("quota.exceeded", user_id=owner["user_id"], metadata={"tier": tier, "limit": limit})
         raise HTTPException(429, f"Monthly API call quota exceeded for '{tier}' tier ({limit:,} calls)")
 
@@ -554,17 +550,29 @@ def _email_from(category: str = "transactional") -> str:
 
 def _queue_email(to_email: str, subject: str, body_html: str, category: str = "transactional"):
     """Queue an email for sending. Uses independent connection to avoid nested locks.
-    category: transactional | support | marketing | founder"""
+    category: transactional | support | marketing | founder
+    Includes a 60-second dedup window: if an email with the same recipient + subject
+    was queued in the last 60 seconds, the duplicate is silently skipped."""
     email_id = f"email_{uuid.uuid4().hex[:16]}"
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
     from_display = _email_from(category)
     conn = None
     try:
         conn = get_standalone_conn()
+        # Dedup check: skip if same (to_email, subject) was queued within the last 60 seconds
+        cutoff = (now - timedelta(seconds=60)).isoformat()
+        dup = conn.execute(
+            "SELECT id FROM email_queue WHERE to_email = ? AND subject = ? AND created_at > ?",
+            (to_email, subject, cutoff)
+        ).fetchone()
+        if dup:
+            logger.info(f"Dedup: skipping duplicate email to {to_email}: {subject} (existing: {dup[0]})")
+            return None
         conn.execute(
             "INSERT INTO email_queue (id, to_email, subject, body_html, status, created_at, from_display) "
             "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
-            (email_id, to_email, subject, body_html, now, from_display)
+            (email_id, to_email, subject, body_html, now_iso, from_display)
         )
         conn.commit()
         logger.info(f"Queued email {email_id} to {to_email}: {subject} (from: {from_display})")
@@ -1008,23 +1016,37 @@ def _email_loop():
         time.sleep(30)  # 30 seconds
 
 def _run_email_tick():
-    """Process up to 10 pending emails."""
+    """Process up to 10 pending emails. Claims rows with status='sending' to prevent
+    duplicate processing if the loop overlaps or multiple workers exist."""
     with get_db() as db:
         pending = db.execute(
             "SELECT id, to_email, subject, body_html, from_display FROM email_queue "
             "WHERE status='pending' ORDER BY created_at ASC LIMIT 10"
         ).fetchall()
 
-        for email in pending:
-            email_id = email["id"]
-            to_email = email["to_email"]
-            subject = email["subject"]
-            body_html = email["body_html"]
-            from_display = email["from_display"] if "from_display" in email.keys() else None
+        if not pending:
+            return
 
-            success = _send_email_smtp(to_email, subject, body_html, from_display)
-            now = datetime.now(timezone.utc).isoformat()
+        # Claim these emails by marking them 'sending' before releasing the lock
+        pending_ids = [e["id"] for e in pending]
+        placeholders = ",".join("?" for _ in pending_ids)
+        db.execute(
+            f"UPDATE email_queue SET status='sending' WHERE id IN ({placeholders}) AND status='pending'",
+            pending_ids
+        )
 
+    # Send outside the db transaction to avoid holding locks during SMTP I/O
+    for email in pending:
+        email_id = email["id"]
+        to_email = email["to_email"]
+        subject = email["subject"]
+        body_html = email["body_html"]
+        from_display = email["from_display"] if "from_display" in email.keys() else None
+
+        success = _send_email_smtp(to_email, subject, body_html, from_display)
+        now = datetime.now(timezone.utc).isoformat()
+
+        with get_db() as db:
             if success:
                 db.execute(
                     "UPDATE email_queue SET status='sent', sent_at=? WHERE id=?",

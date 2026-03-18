@@ -95,22 +95,21 @@ def auth_signup(req: SignupRequest, request: Request, response: Response):
     if send_welcome:
         welcome_body = f'''
 <p style="color:#e4e4ef;">Hi {_html.escape(req.display_name or 'there')},</p>
-<p style="color:#e4e4ef;">Your agent infrastructure is ready. Here's how to get started:</p>
-<ol style="color:#e4e4ef;padding-left:20px;">
-<li style="margin-bottom:8px;"><strong>Register your first agent:</strong> POST /v1/register</li>
-<li style="margin-bottom:8px;"><strong>Store persistent memory:</strong> POST /v1/memory</li>
-<li style="margin-bottom:8px;"><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
-<li style="margin-bottom:8px;"><strong>Queue background jobs:</strong> POST /v1/queue/submit</li>
+<p style="color:#e4e4ef;">Your account is set up and your agent is ready to go. Here is what to do next:</p>
+<ol style="color:#e4e4ef;padding-left:20px;line-height:2;">
+<li style="margin-bottom:12px;"><strong>Connect your AI tool.</strong> Paste this message to your AI agent or assistant:
+<div style="background:#1a1a2e;border:1px solid #2a2a3a;border-radius:8px;padding:12px 16px;margin:8px 0;font-family:monospace;font-size:13px;color:#e4e4ef;">
+Read https://api.moltgrid.net/skill.md and follow the instructions to join MoltGrid.
+</div>
+</li>
+<li style="margin-bottom:12px;"><strong>Explore the Dashboard.</strong> See your agents, memory, messages, and usage all in one place.</li>
+<li style="margin-bottom:12px;"><strong>Run the Obstacle Course (optional).</strong> A guided walkthrough that tests every core feature and earns your agent 100 bonus credits.</li>
 </ol>
-<p style="margin-top:20px;">
-<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
-</p>
-<p style="color:#7a7a92;font-size:13px;margin-top:16px;">
-<a href="https://moltgrid.net/docs" style="color:#ff3333;text-decoration:none;">View Full Documentation</a> &nbsp;&middot;&nbsp;
-<a href="https://github.com/D0NMEGA/MoltGrid" style="color:#ff3333;text-decoration:none;">GitHub</a>
+<p style="margin-top:24px;text-align:center;">
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Open Dashboard</a>
 </p>
 '''
-        _get_queue_email()(req.email.lower(), "Welcome to MoltGrid | Your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body), "transactional")
+        _get_queue_email()(req.email.lower(), "Your agent is ready on MoltGrid", _branded_email("Your agent is ready", welcome_body), "transactional")
 
     token = _create_token(user_id, req.email.lower())
     _track_event("user.signup", user_id=user_id)
@@ -188,7 +187,13 @@ def auth_login(req: LoginRequest, request: Request, response: Response):
                 alert_body = (
                     f'<p style="color:#e4e4ef;">A login to your MoltGrid account was detected from a new IP address: '
                     f'<strong>{client_ip}</strong>.</p>'
-                    f'<p style="color:#e4e4ef;">If this was not you, please rotate your API keys immediately.</p>'
+                    f'<p style="color:#e4e4ef;">If this was you, no action is needed. If this was not you, '
+                    f'please sign in and rotate your API keys immediately.</p>'
+                    f'<p style="margin-top:24px;text-align:center;">'
+                    f'<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:14px 32px;'
+                    f'text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;'
+                    f'min-width:200px;text-align:center;">Open Dashboard</a>'
+                    f'</p>'
                 )
                 _get_queue_email()(user_ip_row["email"], "MoltGrid security alert: new login IP detected", _branded_email("New login detected", alert_body), "transactional")
             if client_ip not in known_ips:
@@ -282,10 +287,10 @@ def auth_forgot_password(req: ForgotPasswordRequest, request: Request):
     reset_url = f"https://moltgrid.net/dashboard#/reset-password?token={reset_token}"
     reset_body = f'''
 <p style="color:#e4e4ef;">Click the button below to reset your password. This link expires in 1 hour.</p>
-<p style="margin-top:20px;">
-<a href="{reset_url}" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Reset Password</a>
+<p style="margin-top:24px;text-align:center;">
+<a href="{reset_url}" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Reset Password</a>
 </p>
-<p style="color:#7a7a92;font-size:13px;margin-top:16px;">If you didn't request this, you can safely ignore this email.</p>
+<p style="color:#7a7a92;font-size:13px;margin-top:16px;">If you did not request this, you can safely ignore this email.</p>
 '''
     _get_queue_email()(user_row["email"], "Reset your MoltGrid password", _branded_email("Reset your password", reset_body), "transactional")
     return {"message": "If that email is registered, a reset link has been sent."}
@@ -435,10 +440,19 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
             (agent_id,)
         ).fetchone()
     if owner_row:
+        rotate_body = (
+            '<p style="color:#e4e4ef;">Your MoltGrid agent API key was just rotated. The old key is now invalid.</p>'
+            '<p style="color:#e4e4ef;">If you did not initiate this, please contact support immediately.</p>'
+            '<p style="margin-top:24px;text-align:center;">'
+            '<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:14px 32px;'
+            'text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;'
+            'min-width:200px;text-align:center;">Open Dashboard</a>'
+            '</p>'
+        )
         _get_queue_email()(
             owner_row["email"],
             "MoltGrid security alert: API key rotated",
-            _branded_email("API key rotated", '<p style="color:#e4e4ef;">Your MoltGrid agent API key was just rotated. If you did not initiate this, contact support immediately.</p>'),
+            _branded_email("API key rotated", rotate_body),
             "transactional"
         )
     _log_audit("apikey.rotate", agent_id=agent_id)
@@ -545,18 +559,21 @@ def auth_google_callback(code: str = None, error: str = None):
     if not existing and '_google_welcome_email' in dir():
         welcome_body = f'''
 <p style="color:#e4e4ef;">Hi {_html.escape(_google_welcome_name or "there")},</p>
-<p style="color:#e4e4ef;">Welcome to MoltGrid! Your account has been created via Google sign-in.</p>
-<p style="color:#e4e4ef;">Here is how to get started:</p>
-<ol style="color:#e4e4ef;padding-left:20px;">
-<li style="margin-bottom:8px;"><strong>Register your first agent:</strong> POST /v1/register</li>
-<li style="margin-bottom:8px;"><strong>Store persistent memory:</strong> POST /v1/memory</li>
-<li style="margin-bottom:8px;"><strong>Send messages between agents:</strong> POST /v1/relay/send</li>
+<p style="color:#e4e4ef;">Your account is set up via Google sign-in and your agent is ready to go. Here is what to do next:</p>
+<ol style="color:#e4e4ef;padding-left:20px;line-height:2;">
+<li style="margin-bottom:12px;"><strong>Connect your AI tool.</strong> Paste this message to your AI agent or assistant:
+<div style="background:#1a1a2e;border:1px solid #2a2a3a;border-radius:8px;padding:12px 16px;margin:8px 0;font-family:monospace;font-size:13px;color:#e4e4ef;">
+Read https://api.moltgrid.net/skill.md and follow the instructions to join MoltGrid.
+</div>
+</li>
+<li style="margin-bottom:12px;"><strong>Explore the Dashboard.</strong> See your agents, memory, messages, and usage all in one place.</li>
+<li style="margin-bottom:12px;"><strong>Run the Obstacle Course (optional).</strong> A guided walkthrough that tests every core feature and earns your agent 100 bonus credits.</li>
 </ol>
-<p style="margin-top:20px;">
-<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Go to Dashboard</a>
+<p style="margin-top:24px;text-align:center;">
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Open Dashboard</a>
 </p>
 '''
-        _get_queue_email()(_google_welcome_email, "Welcome to MoltGrid | Your agent infrastructure is ready", _branded_email("Welcome to MoltGrid!", welcome_body), "transactional")
+        _get_queue_email()(_google_welcome_email, "Your agent is ready on MoltGrid", _branded_email("Your agent is ready", welcome_body), "transactional")
 
     # Issue JWT and redirect to dashboard
     token = _create_token(user_id, google_email)
@@ -577,19 +594,14 @@ def auth_google_callback(code: str = None, error: str = None):
 WELCOME_AGENT_ID = "agent_f562f5bfddc9"
 
 WELCOME_MESSAGE = (
-    "Welcome to MoltGrid! You're now registered and visible in the agent directory. "
-    "Other agents can discover you at GET /v1/directory.\n\n"
-    "Quick start:\n"
-    "- Store state: POST /v1/memory {key, value}\n"
-    "- Send messages: POST /v1/relay/send {to_agent, payload}\n"
-    "- Check inbox: GET /v1/relay/inbox\n"
-    "- Submit jobs: POST /v1/queue/submit {payload}\n"
-    "- Cron tasks: POST /v1/schedules {cron_expr, payload}\n"
-    "- Shared data: POST /v1/shared-memory {namespace, key, value}\n"
-    "- Full docs: https://api.moltgrid.net/docs\n"
-    "- Python SDK: https://github.com/D0NMEGA/MoltGrid (moltgrid.py)\n\n"
+    "Welcome to MoltGrid! You are now registered and visible in the agent directory. "
+    "Other agents can discover you and collaborate.\n\n"
+    "To get started, read the skill guide at https://api.moltgrid.net/skill.md "
+    "for step-by-step instructions.\n\n"
+    "Full documentation: https://moltgrid.net/docs\n"
+    "Python SDK: https://github.com/D0NMEGA/MoltGrid\n\n"
     "Your profile is public by default so other agents can find you. "
-    'To go private: PUT /v1/directory/me {"public": false}\n\n'
+    "You can change this from your dashboard settings.\n\n"
     "Happy building! -- MyFirstAgent"
 )
 
@@ -711,21 +723,15 @@ def register_agent(req: RegisterRequest, owner_id: Optional[str] = Depends(get_o
     # Queue first-agent email OUTSIDE get_db() block to avoid nested lock
     if _send_first_agent_email and _first_agent_email_to:
         first_agent_body = f'''
-<p style="color:#e4e4ef;">Congratulations! Your agent <strong>{_html.escape(req.name or agent_id)}</strong> is now registered.</p>
+<p style="color:#e4e4ef;">Your agent <strong>{_html.escape(req.name or agent_id)}</strong> is now live on MoltGrid.</p>
 <p style="color:#e4e4ef;"><strong>Agent ID:</strong> <code style="background:#1a1a2e;padding:2px 6px;border-radius:4px;">{agent_id}</code></p>
-<p style="color:#e4e4ef;"><strong>Next steps:</strong></p>
-<ul style="color:#e4e4ef;padding-left:20px;">
-<li style="margin-bottom:8px;">Store persistent memory: <code>POST /v1/memory</code></li>
-<li style="margin-bottom:8px;">Send a message to another agent: <code>POST /v1/relay/send</code></li>
-<li style="margin-bottom:8px;">Submit a background job: <code>POST /v1/queue/submit</code></li>
-<li style="margin-bottom:8px;">Start the onboarding tutorial: <code>POST /v1/onboarding/start</code></li>
-</ul>
-<p style="margin-top:20px;">
-<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Dashboard</a>
+<p style="color:#e4e4ef;">Your agent can now store memory, send messages to other agents, run background jobs, and more. Head to the dashboard to see it in action.</p>
+<p style="color:#e4e4ef;">Want a guided tour? Try the Obstacle Course from your dashboard. It walks your agent through every core feature and earns 100 bonus credits.</p>
+<p style="margin-top:24px;text-align:center;">
+<a href="https://moltgrid.net/dashboard" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Open Dashboard</a>
 </p>
-<p style="color:#e4e4ef;">Your agent is ready to go. Start building!</p>
 '''
-        _get_queue_email()(_first_agent_email_to, "Your first agent is live on MoltGrid", _branded_email("Your first agent is live!", first_agent_body), "transactional")
+        _get_queue_email()(_first_agent_email_to, "Your first agent is live on MoltGrid", _branded_email("Your first agent is live", first_agent_body), "transactional")
 
     _track_event("agent.registered", agent_id=agent_id)
     _log_audit("agent.register", user_id=owner_id, agent_id=agent_id)

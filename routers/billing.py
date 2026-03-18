@@ -152,11 +152,10 @@ async def stripe_webhook(request: Request):
                 db.execute("UPDATE users SET stripe_subscription_id = NULL WHERE user_id = ?", (user["user_id"],))
                 _track_event("billing.subscription_cancelled", user_id=user["user_id"])
                 cancel_body = (
-                    '<p style="color:#e4e4ef;">Your MoltGrid subscription has been cancelled. '
-                    'Your account has been downgraded to the <strong>Free</strong> tier.</p>'
-                    '<p style="color:#e4e4ef;">You can re-subscribe anytime from your billing page.</p>'
-                    '<p style="margin-top:20px;">'
-                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Billing</a>'
+                    '<p style="color:#e4e4ef;">Your MoltGrid subscription has been cancelled and your account is now on the <strong>Free</strong> tier.</p>'
+                    '<p style="color:#e4e4ef;">Your agents and data are still here. You can re-subscribe anytime to unlock higher limits.</p>'
+                    '<p style="margin-top:24px;text-align:center;">'
+                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">View Billing</a>'
                     '</p>'
                 )
                 _get_queue_email()(user["email"], "MoltGrid: subscription cancelled", _branded_email("Subscription cancelled", cancel_body), "transactional")
@@ -167,10 +166,10 @@ async def stripe_webhook(request: Request):
                 db.execute("UPDATE users SET payment_failed = 1 WHERE user_id = ?", (user["user_id"],))
                 logger.warning(f"Payment failed for user {user['user_id']}")
                 failed_body = (
-                    '<p style="color:#e4e4ef;">We were unable to process your MoltGrid subscription payment.</p>'
-                    '<p style="color:#e4e4ef;">Please update your payment method to avoid service interruption.</p>'
-                    '<p style="margin-top:20px;">'
-                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">Update Payment</a>'
+                    '<p style="color:#e4e4ef;">We were unable to process your latest MoltGrid subscription payment.</p>'
+                    '<p style="color:#e4e4ef;">Please update your payment method so your agents keep running without interruption.</p>'
+                    '<p style="margin-top:24px;text-align:center;">'
+                    '<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:14px 32px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;min-width:200px;text-align:center;">Update Payment</a>'
                     '</p>'
                 )
                 _get_queue_email()(user["email"], "MoltGrid: payment failed | action required", _branded_email("Payment failed", failed_body), "transactional")
@@ -179,13 +178,46 @@ async def stripe_webhook(request: Request):
         with get_db() as email_db:
             email_user = email_db.execute("SELECT email FROM users WHERE user_id = ?", (_checkout_user_id,)).fetchone()
         if email_user:
+            # Build a comparison table for the upgrade email
+            tier_display = (_checkout_tier or "").capitalize()
+            tier_info = TIER_LIMITS.get(_checkout_tier, TIER_LIMITS.get("free", {}))
+            free_info = TIER_LIMITS.get("free", {})
+            max_agents = tier_info.get("max_agents", "?")
+            max_calls = tier_info.get("max_api_calls")
+            max_calls_str = "Unlimited" if max_calls is None or max_calls >= 999999999 else f"{max_calls:,}"
+            free_agents = free_info.get("max_agents", 1)
+            free_calls = free_info.get("max_api_calls", 10000)
+            free_calls_str = f"{free_calls:,}" if free_calls else "10,000"
+
             confirm_body = (
-                f'<p style="color:#e4e4ef;">Thank you for your purchase. Your account has been upgraded to the <strong>{_checkout_tier}</strong> tier.</p>'
-                f'<p style="margin-top:20px;">'
-                f'<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:12px 24px;text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;">View Dashboard</a>'
+                f'<p style="color:#e4e4ef;">Welcome to the <strong>{tier_display}</strong> plan. '
+                f'Your account has been upgraded and all new limits are active immediately.</p>'
+                f'<p style="color:#e4e4ef;">Here is what changed:</p>'
+                f'<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+                f'<tr style="border-bottom:1px solid #2a2a3a;">'
+                f'<td style="padding:10px 12px;color:#7a7a92;font-size:13px;"></td>'
+                f'<td style="padding:10px 12px;color:#7a7a92;font-size:13px;font-weight:600;">Free</td>'
+                f'<td style="padding:10px 12px;color:#ff3333;font-size:13px;font-weight:600;">{tier_display}</td>'
+                f'</tr>'
+                f'<tr style="border-bottom:1px solid #1a1a2e;">'
+                f'<td style="padding:10px 12px;color:#e4e4ef;">Agents</td>'
+                f'<td style="padding:10px 12px;color:#e4e4ef;">{free_agents}</td>'
+                f'<td style="padding:10px 12px;color:#e4e4ef;font-weight:600;">{max_agents}</td>'
+                f'</tr>'
+                f'<tr style="border-bottom:1px solid #1a1a2e;">'
+                f'<td style="padding:10px 12px;color:#e4e4ef;">API calls/month</td>'
+                f'<td style="padding:10px 12px;color:#e4e4ef;">{free_calls_str}</td>'
+                f'<td style="padding:10px 12px;color:#e4e4ef;font-weight:600;">{max_calls_str}</td>'
+                f'</tr>'
+                f'</table>'
+                f'<p style="color:#e4e4ef;">Head to your dashboard to start using your expanded limits.</p>'
+                f'<p style="margin-top:24px;text-align:center;">'
+                f'<a href="https://moltgrid.net/dashboard#/billing" style="background:#ff3333;color:#fff;padding:14px 32px;'
+                f'text-decoration:none;border-radius:6px;display:inline-block;font-weight:600;font-size:16px;'
+                f'min-width:200px;text-align:center;">Open Dashboard</a>'
                 f'</p>'
             )
-            _get_queue_email()(email_user["email"], f"MoltGrid: {_checkout_tier} plan activated", _branded_email(f"Your MoltGrid {_checkout_tier} plan is now active", confirm_body), "transactional")
+            _get_queue_email()(email_user["email"], f"You're on the {tier_display} plan - here's what's unlocked", _branded_email(f"You're on the {tier_display} plan", confirm_body), "transactional")
     return {"received": True}
 
 @router.get("/v1/billing/status", tags=["Billing"], response_model=BillingStatusResponse)
