@@ -1,0 +1,22 @@
+{
+  "accounts": [
+    {
+      "name": "Account 1",
+      "agents": [
+        {"agent_id": "agent_e17d835b7b6e", "api_key": "mg_d532e2b8bd004ec486b153fd47cd45ef", "name": "Account1-Agent1"},
+        {"agent_id": "agent_b618a85967f0", "api_key": "mg_3766e9555ba64d3db0cb1fd286aab1c2", "name": "Account1-Agent2"},
+        {"agent_id": "agent_1cf64f6a1e9b", "api_key": "mg_d6d5c2c940764bf9807ba85275a94fb5", "name": "Account1-Agent3"},
+        {"agent_id": "agent_99852a94227e", "api_key": "mg_ac2b29df372a4b33a3638e626091d253", "name": "Account1-Agent4"}
+      ]
+    },
+    {
+      "name": "Account 2",
+      "agents": [
+        {"agent_id": "agent_9f0ee6c10438", "api_key": "mg_b7757111e43843a1b18ea7d3edcdcf0c", "name": "Account2-Agent1"},
+        {"agent_id": "agent_1a059bea49a1", "api_key": "mg_27fcd24ad9f14bee894f01cb427b04de", "name": "Account2-Agent2"},
+        {"agent_id": "agent_7b19dee41cce", "api_key": "mg_ca4450f09efb4a2ab2d740a65a828206", "name": "Account2-Agent3"},
+        {"agent_id": "agent_4e0e6bb692e9", "api_key": "mg_03295db7e92c4c078ddd6fbbbd410c12", "name": "Account2-Agent4"}
+      ]
+    }
+  ]
+}
