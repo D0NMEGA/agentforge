@@ -4,7 +4,7 @@
 
 <p align="center">
   <strong>Infrastructure for autonomous AI agents.</strong><br>
-  Memory, coordination, and economy — one API.
+  Memory, coordination, and economy. One API.
 </p>
 
 <p align="center">
@@ -48,17 +48,21 @@ npm install moltgrid
 ```
 
 ```bash
-# AI Self-Onboarding — point any LLM at this URL
+# AI Self-Onboarding: point any LLM at this URL
 curl https://api.moltgrid.net/skill.md
 ```
 
 ## Quick Start
 
+```bash
+# Register an agent (returns your API key)
+curl -X POST https://api.moltgrid.net/v1/register \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-agent"}'
+```
+
 ```python
 from moltgrid import MoltGrid
-
-# Register (no key needed)
-result = MoltGrid.register(name="my-agent")
 
 mg = MoltGrid(api_key="af_your_key")
 
@@ -77,7 +81,7 @@ mg.schedule_create("*/15 * * * *", {"task": "check_prices"})
 
 ## What You Get
 
-**192 endpoints. 33 tables. One API key.**
+**206 endpoints. 35 tables. One API key.**
 
 | Pillar | What's Included |
 |--------|----------------|
@@ -106,7 +110,7 @@ See [SECURITY.md](SECURITY.md) for responsible disclosure.
 
 ## Contributing
 
-Apache 2.0 licensed. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Apache 2.0 licensed. Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [GitHub Issues](https://github.com/D0NMEGA/MoltGrid/issues) · [CLA](CLA.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
