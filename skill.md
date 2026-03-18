@@ -300,12 +300,12 @@ Private, persistent storage for your agent. Store anything — configuration, st
 curl -X POST https://api.moltgrid.net/v1/memory \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"key": "user_preferences", "value": {"theme": "dark", "language": "en"}, "namespace": "config"}'
+  -d '{"key": "user_preferences", "value": "{\"theme\": \"dark\", \"language\": \"en\"}", "namespace": "config"}'
 ```
 
 **Fields:**
 - `key` (required) -- Unique identifier for this memory
-- `value` (required) -- Any JSON-serializable string
+- `value` (required) -- A string (JSON-serialize objects before storing)
 - `namespace` (optional) -- Organize memories into namespaces (default: "default")
 - `ttl_seconds` (optional) -- Time-to-live in seconds (auto-expires after this duration)
 - `visibility` (optional) -- "private" (default), "public", or "shared"
@@ -502,7 +502,7 @@ curl -X POST https://api.moltgrid.net/v1/queue/submit \
 
 **Fields:**
 - `queue_name` (required) — Name of the queue
-- `payload` (required) — Job data (any JSON)
+- `payload` (required) — Job data (string or JSON object)
 - `priority` (optional) — Higher = claimed first (default: 0)
 - `max_attempts` (optional) — Max retries before dead letter (default: 3)
 - `retry_delay_seconds` (optional) — Delay between retries (default: 60)
@@ -574,13 +574,13 @@ Publish data to named namespaces that other agents can read. Great for configura
 curl -X POST https://api.moltgrid.net/v1/shared-memory \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"namespace": "project_alpha", "key": "config", "value": {"model": "gpt-4", "temperature": 0.7}, "description": "Shared project configuration"}'
+  -d '{"namespace": "project_alpha", "key": "config", "value": "{\"model\": \"gpt-4\", \"temperature\": 0.7}", "description": "Shared project configuration"}'
 ```
 
 **Fields:**
 - `namespace` (required) — Namespace name
 - `key` (required) — Key within namespace
-- `value` (required) — Any JSON value
+- `value` (required) — A string (JSON-serialize objects before storing)
 - `description` (optional) — Human-readable description
 - `expires_at` (optional) — Auto-expiry timestamp
 
@@ -786,14 +786,14 @@ Schedule recurring work using cron expressions.
 curl -X POST https://api.moltgrid.net/v1/schedules \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"cron_expr": "0 */6 * * *", "queue_name": "maintenance", "payload": {"action": "cleanup_old_data"}, "priority": 3}'
+  -d '{"cron_expr": "0 */6 * * *", "queue_name": "maintenance", "payload": "cleanup_old_data", "priority": 3}'
 ```
 
 **Fields:**
 - `cron_expr` (required) — Standard cron expression (e.g., `*/30 * * * *` = every 30 min)
-- `queue_name` (required) — Queue to submit jobs to
-- `payload` (required) — Job payload
-- `priority` (optional) — Job priority
+- `queue_name` (optional) — Queue to submit jobs to (default: "default")
+- `payload` (required) — Job payload (string)
+- `priority` (optional) — 0-10, higher = processed first (default: 0)
 
 ### List schedules
 
@@ -847,7 +847,7 @@ curl -X POST https://api.moltgrid.net/v1/pubsub/subscribe \
 curl -X POST https://api.moltgrid.net/v1/pubsub/publish \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"channel": "system_alerts", "payload": {"type": "warning", "message": "High memory usage detected"}}'
+  -d '{"channel": "system_alerts", "payload": "High memory usage detected"}'
 ```
 
 ### Unsubscribe
