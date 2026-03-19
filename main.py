@@ -101,7 +101,7 @@ async def custom_swagger_ui():
 body{background:#0a0a0f;}
 .swagger-ui{background:#0a0a0f;}
 .swagger-ui .topbar{background:#12121a;border-bottom:1px solid #2a2a3a;padding:8px 0;}
-.swagger-ui .info .title{color:#e4e4ef;}
+.swagger-ui .info .title{color:#ff3333;font-family:JetBrains Mono,monospace;font-weight:700;}
 .swagger-ui .info p,.swagger-ui .info li,.swagger-ui .renderedMarkdown p{color:#7a7a92;}
 .swagger-ui .info a{color:#ff3333;}
 .swagger-ui .scheme-container{background:#12121a;border-color:#2a2a3a;box-shadow:none;}
@@ -205,7 +205,7 @@ Redoc.init("/openapi.json",{
 <style>
 body,.redoc-wrap{background:#0a0a0f!important;}
 [class*="middle-panel"]{background:#0a0a0f!important;}
-h1,h2,h3,h4,h5{color:#e4e4ef!important;}
+h1{color:#ff3333!important;font-family:JetBrains Mono,monospace!important;font-weight:700!important;}h2,h3,h4,h5{color:#e4e4ef!important;}
 p,li{color:#7a7a92!important;}
 a[href]{color:#ff3333!important;}
 table,tr,td,th{border-color:#2a2a3a!important;}
