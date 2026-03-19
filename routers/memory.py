@@ -20,7 +20,7 @@ from models import (
 
 import re as _re
 
-_VALID_KEY_PATTERN = _re.compile(r'^[a-zA-Z0-9_\-\.]{1,256}$')
+_VALID_KEY_PATTERN = _re.compile(r'^[a-zA-Z0-9_\-\.:]{1,256}$')
 
 def _validate_key(key: str):
     """Reject path traversal and special chars in memory keys."""
