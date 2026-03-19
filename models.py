@@ -475,6 +475,7 @@ class AdminEmailRequest(BaseModel):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SessionCreateRequest(BaseModel):
+    metadata: Optional[dict] = Field(None, description="Session metadata (JSON object)")
     title: Optional[str] = Field(None, max_length=256)
     max_tokens: int = Field(128000, ge=1000, le=1000000)
 

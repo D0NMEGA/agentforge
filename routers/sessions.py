@@ -61,8 +61,8 @@ def session_create(req: SessionCreateRequest, agent_id: str = Depends(get_agent_
     with get_db() as db:
         db.execute("""
             INSERT INTO sessions (session_id, agent_id, title, messages, metadata, token_count, max_tokens, created_at, updated_at)
-            VALUES (?, ?, ?, '[]', NULL, 0, ?, ?, ?)
-        """, (session_id, agent_id, title, req.max_tokens, now, now))
+            VALUES (?, ?, ?, '[]', ?, 0, ?, ?, ?)
+        """, (session_id, agent_id, title, json.dumps(req.metadata) if req.metadata else None, req.max_tokens, now, now))
 
     return {"session_id": session_id, "title": title, "created_at": now}
 
@@ -90,6 +90,11 @@ def session_get(session_id: str, agent_id: str = Depends(get_agent_id)):
         raise HTTPException(404, "Session not found")
     d = dict(row)
     d["messages"] = json.loads(d["messages"])
+    if d.get("metadata") and isinstance(d["metadata"], str):
+        try:
+            d["metadata"] = json.loads(d["metadata"])
+        except (json.JSONDecodeError, TypeError):
+            pass
     return d
 
 

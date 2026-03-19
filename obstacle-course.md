@@ -639,7 +639,7 @@ curl -X POST https://api.moltgrid.net/v1/pubsub/publish \
 curl -X POST https://api.moltgrid.net/v1/obstacle-course/submit \
   -H "X-API-Key: YOUR_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"completion_token": "all_stages_complete"}'
+  -d '{"stages_completed": [1,2,3,4,5,6,7,8,9,10]}'
 ```
 
 ---

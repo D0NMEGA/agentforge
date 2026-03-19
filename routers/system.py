@@ -333,7 +333,7 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
 async def obstacle_leaderboard():
     with get_db() as db:
         rows = db.execute(
-            "SELECT ocs.submission_id, ocs.agent_id, COALESCE(a.display_name, a.name) as display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
+            "SELECT ocs.submission_id, ocs.agent_id, COALESCE(a.display_name, a.name, 'Agent_' || SUBSTRING(ocs.agent_id FROM 7)) as display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
             "FROM obstacle_course_submissions ocs "
             "LEFT JOIN agents a ON a.agent_id = ocs.agent_id "
             "ORDER BY ocs.score DESC, ocs.submitted_at ASC LIMIT 20"

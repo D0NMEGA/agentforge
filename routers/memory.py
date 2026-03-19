@@ -39,7 +39,10 @@ def memory_get_cross_agent(target_agent_id: str, key: str, namespace: str = "def
 
 
 @router.patch("/v1/memory/{key}/visibility", tags=["Memory"], response_model=MemoryVisibilityResponse)
-def memory_set_visibility(key: str, req: MemoryVisibilityRequest, agent_id: str = Depends(get_agent_id)):
+def memory_set_visibility(key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
+    # Accept namespace from query param or body (body takes precedence)
+    if namespace and req.namespace == "default":
+        req.namespace = namespace
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     with get_db() as db:
@@ -58,6 +61,9 @@ def memory_set(req: MemorySetRequest, agent_id: str = Depends(get_agent_id)):
     if req.ttl_seconds:
         expires = (now + timedelta(seconds=req.ttl_seconds)).isoformat()
     enc_value = _encrypt(req.value)
+    # Accept namespace from query param or body (body takes precedence)
+    if namespace and req.namespace == "default":
+        req.namespace = namespace
     vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     with get_db() as db:
