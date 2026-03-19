@@ -92,16 +92,24 @@ async def add_middleware(request: Request, call_next):
 async def custom_swagger_ui():
     return get_swagger_ui_html(
         openapi_url=app.openapi_url,
-        title=app.title + " — API Docs",
+        title=app.title + " - API Docs",
         swagger_favicon_url="/public/favicon/favicon.ico",
     )
 
 @app.get("/api-redoc", include_in_schema=False)
 async def custom_redoc():
-    return get_redoc_html(
-        openapi_url=app.openapi_url,
-        title=app.title + " — API Reference",
-    )
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("""<!DOCTYPE html>
+<html><head>
+<title>MoltGrid - API Reference</title>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="/public/favicon/favicon.ico">
+<link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+<style>body { margin: 0; padding: 0; }</style>
+</head><body>
+<redoc spec-url="/openapi.json"></redoc>
+<script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+</body></html>""")
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────
