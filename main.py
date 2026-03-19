@@ -90,11 +90,80 @@ async def add_middleware(request: Request, call_next):
 
 @app.get("/api-docs", include_in_schema=False)
 async def custom_swagger_ui():
-    return get_swagger_ui_html(
-        openapi_url=app.openapi_url,
-        title=app.title + " - API Docs",
-        swagger_favicon_url="/public/favicon/favicon.ico",
-    )
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse("""<!DOCTYPE html>
+<html><head>
+<title>MoltGrid - API Docs</title>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="shortcut icon" href="/public/favicon/favicon.ico">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
+<style>
+body{background:#0a0a0f;}
+.swagger-ui{background:#0a0a0f;}
+.swagger-ui .topbar{background:#12121a;border-bottom:1px solid #2a2a3a;padding:8px 0;}
+.swagger-ui .info .title{color:#e4e4ef;}
+.swagger-ui .info p,.swagger-ui .info li,.swagger-ui .renderedMarkdown p{color:#7a7a92;}
+.swagger-ui .info a{color:#ff3333;}
+.swagger-ui .scheme-container{background:#12121a;border-color:#2a2a3a;box-shadow:none;}
+.swagger-ui .opblock-tag{color:#e4e4ef;border-color:#2a2a3a;}
+.swagger-ui .opblock-tag:hover{background:rgba(255,255,255,0.02);}
+.swagger-ui .opblock{background:#12121a;border-color:#2a2a3a;box-shadow:none;}
+.swagger-ui .opblock .opblock-summary{border-color:#2a2a3a;}
+.swagger-ui .opblock .opblock-summary-description{color:#7a7a92;}
+.swagger-ui .opblock .opblock-summary-path{color:#e4e4ef;}
+.swagger-ui .opblock.opblock-get{background:rgba(68,136,255,0.04);border-color:rgba(68,136,255,0.15);}
+.swagger-ui .opblock.opblock-get .opblock-summary-method{background:#4488ff;}
+.swagger-ui .opblock.opblock-post{background:rgba(0,204,102,0.04);border-color:rgba(0,204,102,0.15);}
+.swagger-ui .opblock.opblock-post .opblock-summary-method{background:#00cc66;}
+.swagger-ui .opblock.opblock-put{background:rgba(204,153,0,0.04);border-color:rgba(204,153,0,0.15);}
+.swagger-ui .opblock.opblock-put .opblock-summary-method{background:#cc9900;}
+.swagger-ui .opblock.opblock-delete{background:rgba(255,51,51,0.04);border-color:rgba(255,51,51,0.15);}
+.swagger-ui .opblock.opblock-delete .opblock-summary-method{background:#ff3333;}
+.swagger-ui .opblock.opblock-patch{background:rgba(153,102,204,0.04);border-color:rgba(153,102,204,0.15);}
+.swagger-ui .opblock.opblock-patch .opblock-summary-method{background:#9966cc;}
+.swagger-ui .opblock-body{background:#0a0a0f;}
+.swagger-ui .opblock-body pre,.swagger-ui .microlight{background:#12121a!important;color:#e4e4ef!important;}
+.swagger-ui table thead tr th,.swagger-ui table thead tr td{color:#7a7a92;border-color:#2a2a3a;}
+.swagger-ui table tbody tr td{color:#e4e4ef;border-color:#2a2a3a;}
+.swagger-ui .parameter__name{color:#e4e4ef;}
+.swagger-ui .parameter__type,.swagger-ui .parameter__in{color:#7a7a92;}
+.swagger-ui .prop-type{color:#4488ff;}
+.swagger-ui section.models{border-color:#2a2a3a;}
+.swagger-ui section.models h4{color:#e4e4ef;border-color:#2a2a3a;}
+.swagger-ui .model-container,.swagger-ui .model-box{background:#12121a;border-color:#2a2a3a;}
+.swagger-ui .model,.swagger-ui .model-title{color:#e4e4ef;}
+.swagger-ui .responses-inner{background:#0a0a0f;}
+.swagger-ui .response-col_status{color:#e4e4ef;}
+.swagger-ui .response-col_description{color:#7a7a92;}
+.swagger-ui .btn{color:#e4e4ef;border-color:#2a2a3a;background:#12121a;}
+.swagger-ui .btn:hover{background:#1a1a26;}
+.swagger-ui .btn.authorize{color:#ff3333;border-color:#ff3333;}
+.swagger-ui select{background:#12121a;color:#e4e4ef;border-color:#2a2a3a;}
+.swagger-ui input[type=text],.swagger-ui textarea{background:#12121a;color:#e4e4ef;border-color:#2a2a3a;}
+.swagger-ui .markdown p,.swagger-ui .markdown li{color:#7a7a92;}
+.swagger-ui .servers-title,.swagger-ui .servers>label{color:#7a7a92;}
+.swagger-ui .copy-to-clipboard{background:#1a1a26;}
+.swagger-ui .opblock-description-wrapper p{color:#7a7a92;}
+.swagger-ui .tab li{color:#7a7a92;}
+.swagger-ui .tab li.active{color:#e4e4ef;}
+.swagger-ui .response-control-media-type__accept-message{color:#7a7a92;}
+.swagger-ui .loading-container .loading::after{color:#7a7a92;}
+</style>
+</head><body>
+<div id="swagger-ui"></div>
+<script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+    url:"/openapi.json",
+    dom_id:"#swagger-ui",
+    presets:[SwaggerUIBundle.presets.apis,SwaggerUIBundle.SwaggerUIStandalonePreset],
+    layout:"BaseLayout",
+    deepLinking:true,
+    defaultModelsExpandDepth:-1
+});
+</script>
+</body></html>""")
+
 
 @app.get("/api-redoc", include_in_schema=False)
 async def custom_redoc():
@@ -104,12 +173,51 @@ async def custom_redoc():
 <title>MoltGrid - API Reference</title>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="shortcut icon" href="/public/favicon/favicon.ico">
-<link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
-<style>body { margin: 0; padding: 0; }</style>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>body{margin:0;padding:0;background:#0a0a0f;}</style>
 </head><body>
-<redoc spec-url="/openapi.json"></redoc>
+<div id="redoc-container"></div>
 <script src="https://cdn.jsdelivr.net/npm/redoc@2.1.5/bundles/redoc.standalone.js"></script>
+<script>
+Redoc.init("/openapi.json",{
+  theme:{
+    colors:{
+      primary:{main:"#ff3333"},
+      success:{main:"#00ff88"},
+      warning:{main:"#ffcc00"},
+      error:{main:"#ff4444"},
+      text:{primary:"#e4e4ef",secondary:"#7a7a92"},
+      border:{dark:"#2a2a3a",light:"#2a2a3a"},
+      http:{get:"#4488ff",post:"#00cc66",put:"#cc9900","delete":"#ff3333",patch:"#9966cc"}
+    },
+    typography:{
+      fontSize:"14px",
+      fontFamily:"Space Grotesk, sans-serif",
+      headings:{fontFamily:"Space Grotesk, sans-serif",fontWeight:"600"},
+      code:{fontFamily:"JetBrains Mono, monospace",fontSize:"13px",backgroundColor:"#12121a",color:"#e4e4ef"}
+    },
+    sidebar:{backgroundColor:"#0a0a0f",textColor:"#7a7a92",activeTextColor:"#ff3333"},
+    rightPanel:{backgroundColor:"#12121a",textColor:"#e4e4ef"},
+    schema:{nestedBackground:"#12121a",typeNameColor:"#4488ff",typeTitleColor:"#e4e4ef"}
+  }
+}, document.getElementById("redoc-container"));
+</script>
+<style>
+body,.redoc-wrap{background:#0a0a0f!important;}
+[class*="middle-panel"]{background:#0a0a0f!important;}
+h1,h2,h3,h4,h5{color:#e4e4ef!important;}
+p,li{color:#7a7a92!important;}
+a[href]{color:#ff3333!important;}
+table,tr,td,th{border-color:#2a2a3a!important;}
+tr{background:transparent!important;}
+code{background:#12121a!important;color:#e4e4ef!important;}
+pre{background:#12121a!important;}
+[class*="search"] input{background:#12121a!important;color:#e4e4ef!important;border-color:#2a2a3a!important;}
+[class*="menu-content"]{background:#0a0a0f!important;}
+button{color:#e4e4ef!important;}
+</style>
 </body></html>""")
+
 
 
 # ─── Exception Handlers ─────────────────────────────────────────────────────
