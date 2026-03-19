@@ -204,43 +204,60 @@ def health():
     }
 
 
-@router.get("/v1/stats", response_model=AgentStatsResponse, tags=["System"])
-def stats(agent_id: str = Depends(get_agent_id)):
-    """Your agent's usage stats."""
-    with get_db() as db:
-        agent = db.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
-        mem_count = db.execute("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (agent_id,)).fetchone()["c"]
-        job_count = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (agent_id,)).fetchone()["c"]
-        msg_sent = db.execute("SELECT COUNT(*) as c FROM relay WHERE from_agent=?", (agent_id,)).fetchone()["c"]
-        msg_recv = db.execute("SELECT COUNT(*) as c FROM relay WHERE to_agent=?", (agent_id,)).fetchone()["c"]
+@router.get("/v1/stats", tags=["System"])
+def stats(request: Request):
+    """Usage stats. With X-API-Key: returns agent-specific stats. Without: returns platform stats."""
+    from helpers import hash_key
+    # Try to resolve agent from API key (optional auth)
+    x_api_key = None
+    for h, v in request.headers.items():
+        if h.lower() == "x-api-key":
+            x_api_key = v
+            break
 
-        wh_count = db.execute("SELECT COUNT(*) as c FROM webhooks WHERE agent_id=? AND active=1", (agent_id,)).fetchone()["c"]
-        sched_count = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE agent_id=? AND enabled=1", (agent_id,)).fetchone()["c"]
-        shared_count = db.execute("SELECT COUNT(*) as c FROM shared_memory WHERE owner_agent=?", (agent_id,)).fetchone()["c"]
-        collabs_given = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE agent_id=?", (agent_id,)).fetchone()["c"]
-        collabs_recv = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE partner_agent=?", (agent_id,)).fetchone()["c"]
-        market_created = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE creator_agent=?", (agent_id,)).fetchone()["c"]
-        market_completed = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE claimed_by=? AND status='completed'", (agent_id,)).fetchone()["c"]
-
-    return {
-        "agent_id": agent_id,
-        "name": agent["name"],
-        "created_at": agent["created_at"],
-        "total_requests": agent["request_count"],
-        "memory_keys": mem_count,
-        "jobs_submitted": job_count,
-        "messages_sent": msg_sent,
-        "messages_received": msg_recv,
-        "active_webhooks": wh_count,
-        "active_schedules": sched_count,
-        "shared_memory_keys": shared_count,
-        "credits": agent["credits"] or 0,
-        "reputation": agent["reputation"] or 0.0,
-        "collaborations_given": collabs_given,
-        "collaborations_received": collabs_recv,
-        "marketplace_tasks_created": market_created,
-        "marketplace_tasks_completed": market_completed,
-    }
+    if x_api_key:
+        # Agent-specific stats
+        with get_db() as db:
+            agent = db.execute("SELECT * FROM agents WHERE api_key_hash=?", (hash_key(x_api_key),)).fetchone()
+            if not agent:
+                raise HTTPException(401, "Invalid API key")
+            aid = agent["agent_id"]
+            mem_count = db.execute("SELECT COUNT(*) as c FROM memory WHERE agent_id=?", (aid,)).fetchone()["c"]
+            job_count = db.execute("SELECT COUNT(*) as c FROM queue WHERE agent_id=?", (aid,)).fetchone()["c"]
+            msg_sent = db.execute("SELECT COUNT(*) as c FROM relay WHERE from_agent=?", (aid,)).fetchone()["c"]
+            msg_recv = db.execute("SELECT COUNT(*) as c FROM relay WHERE to_agent=?", (aid,)).fetchone()["c"]
+            wh_count = db.execute("SELECT COUNT(*) as c FROM webhooks WHERE agent_id=? AND active=1", (aid,)).fetchone()["c"]
+            sched_count = db.execute("SELECT COUNT(*) as c FROM scheduled_tasks WHERE agent_id=? AND enabled=1", (aid,)).fetchone()["c"]
+            shared_count = db.execute("SELECT COUNT(*) as c FROM shared_memory WHERE owner_agent=?", (aid,)).fetchone()["c"]
+            collabs_given = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE agent_id=?", (aid,)).fetchone()["c"]
+            collabs_recv = db.execute("SELECT COUNT(*) as c FROM collaborations WHERE partner_agent=?", (aid,)).fetchone()["c"]
+            market_created = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE creator_agent=?", (aid,)).fetchone()["c"]
+            market_completed = db.execute("SELECT COUNT(*) as c FROM marketplace WHERE claimed_by=? AND status=?", (aid, "completed")).fetchone()["c"]
+        return {
+            "agent_id": aid, "name": agent["name"], "created_at": agent["created_at"],
+            "total_requests": agent["request_count"], "memory_keys": mem_count,
+            "jobs_submitted": job_count, "messages_sent": msg_sent, "messages_received": msg_recv,
+            "active_webhooks": wh_count, "active_schedules": sched_count,
+            "shared_memory_keys": shared_count, "credits": agent["credits"] or 0,
+            "reputation": agent["reputation"] or 0.0,
+            "collaborations_given": collabs_given, "collaborations_received": collabs_recv,
+            "marketplace_tasks_created": market_created, "marketplace_tasks_completed": market_completed,
+        }
+    else:
+        # Platform-level stats (no auth required)
+        with get_db() as db:
+            agents = db.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
+            online = db.execute("SELECT COUNT(*) as c FROM agents WHERE heartbeat_status=?", ("online",)).fetchone()["c"]
+            memory_keys = db.execute("SELECT COUNT(*) as c FROM memory").fetchone()["c"]
+            total_jobs = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
+            messages = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
+            marketplace_tasks = db.execute("SELECT COUNT(*) as c FROM marketplace").fetchone()["c"]
+        return {
+            "platform": "MoltGrid", "version": "0.9.0",
+            "registered_agents": agents, "online_agents": online,
+            "total_memory_keys": memory_keys, "total_jobs": total_jobs,
+            "total_messages": messages, "total_marketplace_tasks": marketplace_tasks,
+        }
 
 
 class TextProcessRequest(BaseModel):
