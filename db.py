@@ -8,6 +8,7 @@ All database access in main.py should go through get_db() and get_standalone_con
 import os
 import json
 import uuid
+import queue
 import sqlite3
 import logging
 from contextlib import contextmanager
@@ -56,6 +57,69 @@ def close_pool():
         except Exception as e:
             logger.warning("Error closing PostgreSQL pool: %s", e)
         _pg_pool = None
+
+
+# ─── SQLite Connection Pool ──────────────────────────────────────────────────
+
+class SQLitePool:
+    """Thread-safe SQLite connection pool using queue.Queue.
+
+    Pre-creates `pool_size` connections with WAL mode, busy_timeout, and
+    synchronous=NORMAL for optimal concurrent read/write performance.
+    """
+
+    def __init__(self, db_path: str, pool_size: int = 5):
+        self._pool = queue.Queue(maxsize=pool_size)
+        for _ in range(pool_size):
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            self._pool.put(conn)
+
+    @contextmanager
+    def connection(self):
+        """Borrow a connection from the pool, return it when done."""
+        conn = self._pool.get(timeout=10)
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            self._pool.put(conn)
+
+    def close(self):
+        """Drain the queue and close all pooled connections."""
+        while not self._pool.empty():
+            try:
+                conn = self._pool.get_nowait()
+                conn.close()
+            except queue.Empty:
+                break
+        logger.info("SQLite connection pool closed")
+
+
+_sqlite_pool = None
+
+
+def init_sqlite_pool():
+    """Initialize the SQLite connection pool (called during app lifespan startup)."""
+    global _sqlite_pool
+    if DB_BACKEND == "sqlite":
+        _sqlite_pool = SQLitePool(DB_PATH, pool_size=5)
+        logger.info("SQLite connection pool initialized (size=5)")
+
+
+def close_sqlite_pool():
+    """Close the SQLite connection pool (called during app lifespan shutdown)."""
+    global _sqlite_pool
+    if _sqlite_pool is not None:
+        _sqlite_pool.close()
+        _sqlite_pool = None
 
 
 # ─── SQL Translation ─────────────────────────────────────────────────────────
@@ -175,13 +239,18 @@ def get_db():
     - dual: write to both, read from postgres with fallback to sqlite
     """
     if DB_BACKEND == "sqlite":
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        if _sqlite_pool is not None:
+            with _sqlite_pool.connection() as conn:
+                yield conn
+        else:
+            # Fallback: direct connection when pool is not initialized
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
     elif DB_BACKEND == "postgres":
         if _pg_pool is None:
             raise RuntimeError("PostgreSQL pool not initialized. Call init_pool() first.")
@@ -671,6 +740,13 @@ def _init_db_sqlite(conn):
             created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event_name, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id);
+        CREATE INDEX IF NOT EXISTS idx_agents_heartbeat ON agents(heartbeat_at, heartbeat_status);
+        CREATE INDEX IF NOT EXISTS idx_relay_unread ON relay(to_agent, read_at);
+        CREATE INDEX IF NOT EXISTS idx_queue_agent ON queue(agent_id, status);
+        CREATE INDEX IF NOT EXISTS idx_sched_agent ON scheduled_tasks(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_analytics_agent ON analytics_events(agent_id, created_at);
     """)
 
     # Migrate existing agents table — add columns that older versions didn't have
