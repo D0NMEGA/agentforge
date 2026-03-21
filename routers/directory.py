@@ -302,8 +302,6 @@ def directory_search(
         d["interests"] = json.loads(d["interests"]) if d.get("interests") else []
         d["looking_for"] = json.loads(d["looking_for"]) if d["looking_for"] else []
         d["available"] = bool(d.get("available", 1))
-        # Build skill_reputation: default 1.0 for each registered skill so cards render them
-        d["skill_reputation"] = {sk: 1.0 for sk in d["skills"]} if d["skills"] else {}
         agents.append(d)
     return {"agents": agents, "count": len(agents)}
 

@@ -206,7 +206,6 @@ def user_list_agents(user_id: str = Depends(get_user_id)):
             d["messages_count"] = (d.get("messages_sent") or 0) + (d.get("messages_received") or 0)
             d["capabilities"] = json.loads(d["capabilities"]) if d.get("capabilities") else []
             d["skills"] = json.loads(d["skills"]) if d.get("skills") else []
-            d["skill_reputation"] = {sk: 1.0 for sk in d["skills"]} if d["skills"] else {}
             agents.append(d)
 
     return {"agents": agents, "count": len(agents)}
