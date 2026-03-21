@@ -59,6 +59,104 @@ def close_pool():
         _pg_pool = None
 
 
+# ─── Native Async Pool (asyncpg) ─────────────────────────────────────────────
+try:
+    import asyncpg
+except ImportError:
+    asyncpg = None  # type: ignore[assignment]
+
+_asyncpg_pool = None
+
+
+async def init_asyncpg_pool():
+    """Initialize native async connection pool via asyncpg.
+
+    Only activates when DB_BACKEND is 'postgres' or 'dual' and DATABASE_URL
+    is set. Falls back gracefully (pool stays None) on import or connection
+    errors so that SQLite local dev is never broken.
+    """
+    global _asyncpg_pool
+    if DB_BACKEND not in ("postgres", "dual"):
+        logger.info("asyncpg pool skipped (DB_BACKEND=%s)", DB_BACKEND)
+        return
+    if not DATABASE_URL:
+        logger.error("DB_BACKEND=%s but DATABASE_URL not set; asyncpg pool not created", DB_BACKEND)
+        return
+    if asyncpg is None:
+        logger.error("asyncpg package not installed; native async pool unavailable")
+        return
+    try:
+        from config import ASYNCPG_MIN_SIZE, ASYNCPG_MAX_SIZE, ASYNCPG_COMMAND_TIMEOUT
+        _asyncpg_pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            min_size=ASYNCPG_MIN_SIZE,
+            max_size=ASYNCPG_MAX_SIZE,
+            command_timeout=ASYNCPG_COMMAND_TIMEOUT,
+        )
+        logger.info(
+            "asyncpg connection pool initialized (min=%d, max=%d, timeout=%ds)",
+            ASYNCPG_MIN_SIZE, ASYNCPG_MAX_SIZE, ASYNCPG_COMMAND_TIMEOUT,
+        )
+    except Exception as e:
+        logger.error("Failed to initialize asyncpg pool: %s", e)
+        _asyncpg_pool = None
+
+
+async def close_asyncpg_pool():
+    """Close the asyncpg connection pool if it exists."""
+    global _asyncpg_pool
+    if _asyncpg_pool is not None:
+        try:
+            await _asyncpg_pool.close()
+            logger.info("asyncpg connection pool closed")
+        except Exception as e:
+            logger.warning("Error closing asyncpg pool: %s", e)
+        _asyncpg_pool = None
+
+
+def _translate_sql_asyncpg(sql):
+    """Translate SQLite SQL to asyncpg-compatible SQL.
+
+    - Replace ? placeholders with $1, $2, $3 numbered params
+    - Translate datetime() calls to CAST/interval expressions
+    - Skip ? inside single-quoted string literals
+    """
+    # First, apply datetime translations (same as _translate_sql)
+    sql = _RE_DATETIME_OFFSET.sub(
+        r"(CAST(\1 AS TIMESTAMP) + INTERVAL '\2 seconds')", sql
+    )
+    sql = _RE_DATETIME_DYNAMIC_OFFSET.sub(
+        r"(CAST(\1 AS TIMESTAMP) - (\2 || ' seconds')::INTERVAL)", sql
+    )
+    sql = _RE_DATETIME_SIMPLE.sub(r"CAST(\1 AS TIMESTAMP)", sql)
+
+    # Replace ? with $N, skipping ? inside single-quoted strings
+    result = []
+    param_idx = 0
+    in_string = False
+    i = 0
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'" and not in_string:
+            in_string = True
+            result.append(ch)
+        elif ch == "'" and in_string:
+            # Handle escaped quotes ('')
+            if i + 1 < len(sql) and sql[i + 1] == "'":
+                result.append("''")
+                i += 2
+                continue
+            in_string = False
+            result.append(ch)
+        elif ch == "?" and not in_string:
+            param_idx += 1
+            result.append(f"${param_idx}")
+        else:
+            result.append(ch)
+        i += 1
+    return "".join(result)
+
+
 # ─── SQLite Connection Pool ──────────────────────────────────────────────────
 
 class SQLitePool:
