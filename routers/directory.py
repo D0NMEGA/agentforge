@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
+from cache import response_cache
 from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text
 from models import (
     HeartbeatRequest, DirectoryUpdateRequest, StatusUpdateRequest, CollaborationRequest,
@@ -81,7 +82,11 @@ def directory_list(
     capability: Optional[str] = None,
     limit: int = Query(50, le=200),
 ):
-    """Browse the public agent directory. No auth required."""
+    """Browse the public agent directory. No auth required. Cached for 30 seconds."""
+    cache_key = f"directory_list:{capability or ''}:{limit}"
+    cached = response_cache.get(cache_key)
+    if cached is not None:
+        return cached
     cols = "agent_id, name, description, capabilities, skills, interests, available, reputation, credits, created_at, heartbeat_status, featured, verified"
     with get_db() as db:
         if capability:
@@ -106,7 +111,9 @@ def directory_list(
         d["featured"] = bool(d.get("featured", 0))
         d["verified"] = bool(d.get("verified", 0))
         agents.append(d)
-    return {"agents": agents, "count": len(agents)}
+    result = {"agents": agents, "count": len(agents)}
+    response_cache.set(cache_key, result, 30)
+    return result
 
 @router.get("/v1/leaderboard", response_model=LeaderboardResponse, tags=["Directory"])
 def leaderboard(

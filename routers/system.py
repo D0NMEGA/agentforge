@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 import httpx
 from config import TURNSTILE_SECRET_KEY, _fernet, logger
 from db import get_db
+from cache import response_cache
 from state import _ws_connections, _network_ws_clients
 from helpers import (
     get_agent_id, _decrypt, _queue_email, _branded_email,
@@ -146,7 +147,10 @@ def submit_contact(form: ContactForm):
 
 @router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
 def sla():
-    """Public SLA / uptime information — no auth required."""
+    """Public SLA / uptime information -- no auth required. Cached for 60 seconds."""
+    cached = response_cache.get("sla")
+    if cached is not None:
+        return cached
     with get_db() as db:
         windows = {"24h": 1, "7d": 7, "30d": 30}
         result = {}
@@ -163,7 +167,7 @@ def sla():
                 "avg_response_ms": round(avg_ms, 2),
             }
         last_check = db.execute("SELECT * FROM uptime_checks ORDER BY checked_at DESC LIMIT 1").fetchone()
-    return {
+    sla_result = {
         "sla_target": "99.9%",
         "current_status": "operational",
         "windows": result,
@@ -171,11 +175,16 @@ def sla():
         "check_interval_seconds": 60,
         "encryption_enabled": _fernet is not None,
     }
+    response_cache.set("sla", sla_result, 60)
+    return sla_result
 
 
 @router.get("/v1/health", response_model=HealthResponse, tags=["System"])
 def health():
-    """Public health check — no auth required."""
+    """Public health check -- no auth required. Cached for 10 seconds."""
+    cached = response_cache.get("health")
+    if cached is not None:
+        return cached
     with get_db() as db:
         agent_count = db.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
         job_count = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
@@ -186,7 +195,7 @@ def health():
         shared_keys = db.execute("SELECT COUNT(*) as c FROM shared_memory").fetchone()["c"]
         public_agents = db.execute("SELECT COUNT(*) as c FROM agents WHERE public=1").fetchone()["c"]
 
-    return {
+    result = {
         "status": "operational",
         "version": "0.9.0",
         "stats": {
@@ -202,6 +211,8 @@ def health():
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    response_cache.set("health", result, 10)
+    return result
 
 
 @router.get("/v1/stats", tags=["System"])
@@ -244,7 +255,10 @@ def stats(request: Request):
             "marketplace_tasks_created": market_created, "marketplace_tasks_completed": market_completed,
         }
     else:
-        # Platform-level stats (no auth required)
+        # Platform-level stats (no auth required) -- cached 15 seconds
+        cached = response_cache.get("stats_platform")
+        if cached is not None:
+            return cached
         with get_db() as db:
             agents = db.execute("SELECT COUNT(*) as c FROM agents").fetchone()["c"]
             online = db.execute("SELECT COUNT(*) as c FROM agents WHERE heartbeat_status=?", ("online",)).fetchone()["c"]
@@ -252,12 +266,14 @@ def stats(request: Request):
             total_jobs = db.execute("SELECT COUNT(*) as c FROM queue").fetchone()["c"]
             messages = db.execute("SELECT COUNT(*) as c FROM relay").fetchone()["c"]
             marketplace_tasks = db.execute("SELECT COUNT(*) as c FROM marketplace").fetchone()["c"]
-        return {
+        platform_stats = {
             "platform": "MoltGrid", "version": "0.9.0",
             "registered_agents": agents, "online_agents": online,
             "total_memory_keys": memory_keys, "total_jobs": total_jobs,
             "total_messages": messages, "total_marketplace_tasks": marketplace_tasks,
         }
+        response_cache.set("stats_platform", platform_stats, 15)
+        return platform_stats
 
 
 class TextProcessRequest(BaseModel):
@@ -348,6 +364,9 @@ async def obstacle_submit(body: ObstacleCourseSubmitRequest, agent_id: str = Dep
 
 @router.get("/v1/obstacle-course/leaderboard", response_model=List[ObstacleLeaderboardItem], tags=["Obstacle Course"])
 async def obstacle_leaderboard():
+    cached = response_cache.get("obstacle_leaderboard")
+    if cached is not None:
+        return cached
     with get_db() as db:
         rows = db.execute(
             "SELECT ocs.submission_id, ocs.agent_id, COALESCE(a.display_name, a.name, 'Agent_' || SUBSTR(ocs.agent_id, 7)) as display_name, ocs.score, ocs.stages_completed, ocs.submitted_at, ocs.feedback "
@@ -355,7 +374,7 @@ async def obstacle_leaderboard():
             "LEFT JOIN agents a ON a.agent_id = ocs.agent_id "
             "ORDER BY ocs.score DESC, ocs.submitted_at ASC LIMIT 20"
         ).fetchall()
-    return [
+    result = [
         {
             "submission_id": r["submission_id"],
             "agent_id": r["agent_id"],
@@ -367,6 +386,8 @@ async def obstacle_leaderboard():
         }
         for r in rows
     ]
+    response_cache.set("obstacle_leaderboard", result, 30)
+    return result
 
 
 @router.get("/v1/obstacle-course/my-result", response_model=ObstacleMyResultResponse, tags=["Obstacle Course"])
