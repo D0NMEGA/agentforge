@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 42-02-PLAN.md -- relay dead-letter, 3 new message endpoints, 107 tests passing.
-last_updated: "2026-03-23T20:48:25.082Z"
+stopped_at: Completed 43-01-PLAN.md -- SSE push stream live, 342 tests passing
+last_updated: "2026-03-23T21:38:04.184Z"
 last_activity: "2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints"
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 4
-  total_plans: 8
-  completed_plans: 10
+  total_plans: 10
+  completed_plans: 11
   percent: 100
 ---
 
@@ -56,6 +56,7 @@ Progress: [██████████] 100%
 - Trend: consistent
 
 *Updated after each plan completion*
+| Phase 43-sse-push-cursor-inbox P01 | 32 | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,9 @@ Recent decisions affecting current work:
 - [42-02] GET /v1/messages/dead-letter registered before /{message_id}/status to avoid FastAPI route ambiguity
 - [42-02] DeadLetterMessageListResponse renamed to avoid collision with queue DeadLetterListResponse in models.py
 - [42-02] relay_mark_read updates status column + status_updated_at alongside read_at for lifecycle consistency
+- [Phase 43-01]: asyncio.Queue fan-out for SSE (intra-worker only); Redis pub/sub deferred to Plan 02
+- [Phase 43-01]: uvicorn test server pattern for infinite-stream SSE tests (httpx ASGITransport deadlock workaround)
+- [Phase 43-01]: Last-Event-ID replay uses created_at anchor query not lexicographic event_id comparison
 
 ### Pending Todos
 
@@ -126,6 +130,6 @@ None -- Phase 42 Plan 02 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-23
-Stopped at: Completed 42-02-PLAN.md -- relay dead-letter, 3 new message endpoints, 107 tests passing.
+Last session: 2026-03-23T21:38:04.180Z
+Stopped at: Completed 43-01-PLAN.md -- SSE push stream live, 342 tests passing
 Resume file: None

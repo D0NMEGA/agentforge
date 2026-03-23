@@ -227,8 +227,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 43-01-PLAN.md � sse-starlette dependency, state._sse_connections, helpers._queue_agent_event fan-out, routers/sse.py SSE endpoint, main.py wire-in, test scaffold (PUSH-01, PUSH-02, PUSH-04, PUSH-06)
-- [ ] 43-02-PLAN.md � RelayInboxResponse next_cursor field, relay_inbox after= cursor, HealthComponentStatus/HealthComponents models, health endpoint components (PUSH-03, PUSH-05)
+- [ ] 43-01-PLAN.md � sse-starlette dependency, state._sse_connections, helpers._queue_agent_event fan-out, routers/sse.py SSE endpoint, main.py wire-in, test scaffold (PUSH-01, PUSH-02, PUSH-04, PUSH-06)
+- [ ] 43-02-PLAN.md � RelayInboxResponse next_cursor field, relay_inbox after= cursor, HealthComponentStatus/HealthComponents models, health endpoint components (PUSH-03, PUSH-05)
 
 ## Progress
 
@@ -251,4 +251,4 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 | 40. Backend Scalability & Load Hardening | 3/3 | Complete | 2026-03-21 |
 | 41. Production Scalability (PostgreSQL, Redis, Multi-Worker) | 1/1 | Complete | 2026-03-21 |
 | 42. Fix Message Delivery | 2/2 | Complete | 2026-03-23 |
-| 43. SSE Push + Cursor Inbox | 0/2 | In progress | - |
+| 43. SSE Push + Cursor Inbox | 1/2 | In Progress|  |
