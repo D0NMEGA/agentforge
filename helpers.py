@@ -410,7 +410,8 @@ def _log_audit(
 
 
 def _queue_agent_event(agent_id: str, event_type: str, payload: dict):
-    """Insert an event into agent_events. Uses own connection -- call OUTSIDE get_db() blocks."""
+    """Insert an event into agent_events and fan-out to SSE subscribers.
+    Uses own DB connection -- call OUTSIDE get_db() blocks."""
     try:
         event_id = str(uuid.uuid4())
         now = datetime.utcnow().isoformat()
@@ -422,6 +423,14 @@ def _queue_agent_event(agent_id: str, event_type: str, payload: dict):
         )
         conn.commit()
         conn.close()
+        # Fan-out to SSE subscribers (asyncio.Queue per connected client)
+        from state import _sse_connections
+        push_payload = {"event_id": event_id, "event_type": event_type, "payload": payload}
+        for q in list(_sse_connections.get(agent_id, set())):
+            try:
+                q.put_nowait(push_payload)
+            except Exception:
+                pass  # Slow consumer or full queue -- event available via Last-Event-ID replay
     except Exception:
         pass  # fire-and-forget
 

@@ -4851,22 +4851,58 @@ class TestSSEStream:
         assert r.status_code == 403
 
     def test_sse_content_type(self):
-        """SSE endpoint returns text/event-stream content type."""
-        # Use stream=True to avoid buffering; read only headers
-        with self.client.stream(
-            "GET",
-            f"/v1/agents/{self.agent_a_id}/events",
-            headers={"X-API-Key": self.agent_a_key},
-        ) as r:
-            assert r.status_code == 200
-            ct = r.headers.get("content-type", "")
-            assert "text/event-stream" in ct
+        """SSE endpoint returns text/event-stream content type.
+
+        Runs a live uvicorn server in a thread; uses httpx with a timeout
+        so the infinite stream test does not hang.
+        """
+        import threading, time, socket
+        import httpx
+        import uvicorn
+
+        # Find a free port
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        server = uvicorn.Server(config)
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
+
+        # Wait for server to start
+        deadline = time.time() + 5
+        while not server.started and time.time() < deadline:
+            time.sleep(0.05)
+        assert server.started, "uvicorn test server did not start in time"
+
+        try:
+            base = f"http://127.0.0.1:{port}"
+            with httpx.Client(timeout=3.0) as hc:
+                with hc.stream(
+                    "GET",
+                    f"{base}/v1/agents/{self.agent_a_id}/events",
+                    headers={"X-API-Key": self.agent_a_key},
+                ) as r:
+                    assert r.status_code == 200
+                    ct = r.headers.get("content-type", "")
+                    assert "text/event-stream" in ct
+                    # Headers verified -- close stream immediately
+        finally:
+            server.should_exit = True
+            server_thread.join(timeout=3)
 
     def test_last_event_id_replay(self):
-        """After relay_send, reconnect with Last-Event-ID replays the event."""
-        import time
-        # Send a relay message to agent_a (populates agent_events via _queue_agent_event)
-        # Need a sender agent
+        """After relay_send, reconnect with Last-Event-ID replays the event.
+
+        Runs a live uvicorn server in a thread for real SSE streaming.
+        """
+        import threading, time, socket
+        import httpx
+        import uvicorn
+
+        # Need a sender agent -- use synchronous client for setup
         r_sender = self.client.post("/v1/register", json={"name": "sse_sender"})
         sender_key = r_sender.json()["api_key"]
         self.client.post(
@@ -4894,18 +4930,40 @@ class TestSSEStream:
         )
         time.sleep(0.1)
 
+        # Find a free port
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+
+        config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error")
+        server = uvicorn.Server(config)
+        server_thread = threading.Thread(target=server.run, daemon=True)
+        server_thread.start()
+
+        deadline = time.time() + 5
+        while not server.started and time.time() < deadline:
+            time.sleep(0.05)
+        assert server.started, "uvicorn test server did not start in time"
+
         collected = []
-        with self.client.stream(
-            "GET",
-            f"/v1/agents/{self.agent_a_id}/events",
-            headers={"X-API-Key": self.agent_a_key, "last-event-id": last_event_id},
-        ) as r:
-            assert r.status_code == 200
-            for line in r.iter_lines():
-                if line.startswith("data:"):
-                    collected.append(line)
-                if len(collected) >= 1:
-                    break  # Got replay event, stop reading
+        try:
+            base = f"http://127.0.0.1:{port}"
+            with httpx.Client(timeout=5.0) as hc:
+                with hc.stream(
+                    "GET",
+                    f"{base}/v1/agents/{self.agent_a_id}/events",
+                    headers={"X-API-Key": self.agent_a_key, "last-event-id": last_event_id},
+                ) as r:
+                    assert r.status_code == 200
+                    for line in r.iter_lines():
+                        if line.startswith("data:"):
+                            collected.append(line)
+                        if len(collected) >= 1:
+                            break  # Got replay event, close stream
+        finally:
+            server.should_exit = True
+            server_thread.join(timeout=3)
 
         assert len(collected) >= 1, "Expected at least 1 replayed event after Last-Event-ID"
 
