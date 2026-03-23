@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 43-01-PLAN.md -- SSE push stream live, 342 tests passing
-last_updated: "2026-03-23T21:38:04.184Z"
+stopped_at: Completed 43-02-PLAN.md -- cursor inbox + health components live, 344 tests passing
+last_updated: "2026-03-23T21:49:03.346Z"
 last_activity: "2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints"
 progress:
   total_phases: 12
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 10
-  completed_plans: 11
+  completed_plans: 12
   percent: 100
 ---
 
@@ -57,6 +57,7 @@ Progress: [██████████] 100%
 
 *Updated after each plan completion*
 | Phase 43-sse-push-cursor-inbox P01 | 32 | 2 tasks | 6 files |
+| Phase 43-sse-push-cursor-inbox P02 | 18 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,9 @@ Recent decisions affecting current work:
 - [Phase 43-01]: asyncio.Queue fan-out for SSE (intra-worker only); Redis pub/sub deferred to Plan 02
 - [Phase 43-01]: uvicorn test server pattern for infinite-stream SSE tests (httpx ASGITransport deadlock workaround)
 - [Phase 43-01]: Last-Event-ID replay uses created_at anchor query not lexicographic event_id comparison
+- [Phase 43-02]: cursor resolves to created_at anchor (not lexicographic message_id) since msg_{uuid4} is not time-ordered
+- [Phase 43-02]: unknown cursor returns empty list not error for safe polling by agents that restart
+- [Phase 43-02]: relay degraded threshold is 10 stuck messages older than 5 minutes
 
 ### Pending Todos
 
@@ -130,6 +134,6 @@ None -- Phase 42 Plan 02 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-23T21:38:04.180Z
-Stopped at: Completed 43-01-PLAN.md -- SSE push stream live, 342 tests passing
+Last session: 2026-03-23T21:48:56.408Z
+Stopped at: Completed 43-02-PLAN.md -- cursor inbox + health components live, 344 tests passing
 Resume file: None

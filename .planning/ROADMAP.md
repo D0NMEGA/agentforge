@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: PostgreSQL Migration** - Database abstraction layer, migration scripts, backend-agnostic test suite (completed 2026-03-15)
 - [x] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (completed 2026-03-15)
 - [x] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (completed 2026-03-15)
-- [ ] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting
+- [x] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting (completed 2026-03-23)
 
 ## Phase Details
 
@@ -251,4 +251,4 @@ Phases execute in numeric order: 1 → 9 → 10 → 2 → 3 → 4 → 5 → 6 �
 | 40. Backend Scalability & Load Hardening | 3/3 | Complete | 2026-03-21 |
 | 41. Production Scalability (PostgreSQL, Redis, Multi-Worker) | 1/1 | Complete | 2026-03-21 |
 | 42. Fix Message Delivery | 2/2 | Complete | 2026-03-23 |
-| 43. SSE Push + Cursor Inbox | 1/2 | In Progress|  |
+| 43. SSE Push + Cursor Inbox | 2/2 | Complete   | 2026-03-23 |
