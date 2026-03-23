@@ -1167,6 +1167,36 @@ def _init_db_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_keys_user ON user_keys(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_keys_hash ON user_keys(key_hash)")
 
+    # Promo codes — launch campaign (first 50 = Scale, rest = Teams, 3 months free)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS promo_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE NOT NULL,
+            tier TEXT NOT NULL DEFAULT 'scale',
+            generated_ip TEXT,
+            generated_at TEXT NOT NULL,
+            expires_at TEXT,
+            redeemed_at TEXT,
+            redeemed_by TEXT,
+            FOREIGN KEY (redeemed_by) REFERENCES users(user_id)
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_code ON promo_codes(code)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_redeemed ON promo_codes(redeemed_by)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_promo_ip ON promo_codes(generated_ip, redeemed_at)")
+
+    # Migrate users table — add promo tracking columns
+    try:
+        u_promo = _get_existing_columns(conn, "users")
+        for col, typedef in [
+            ("promo_tier", "TEXT"),
+            ("promo_expires_at", "TEXT"),
+        ]:
+            if col not in u_promo:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} {typedef}")
+    except Exception:
+        pass
+
     # Migrate users table — add timezone and avatar
     try:
         u_existing2 = _get_existing_columns(conn, "users")
@@ -1466,7 +1496,9 @@ def _init_db_postgres(conn):
             timezone TEXT DEFAULT 'America/Chicago',
             avatar_url TEXT,
             deletion_requested_at TEXT,
-            last_username_change TEXT
+            last_username_change TEXT,
+            promo_tier TEXT,
+            promo_expires_at TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS email_queue (
             id TEXT PRIMARY KEY,
@@ -1624,6 +1656,17 @@ def _init_db_postgres(conn):
             status TEXT DEFAULT 'active',
             FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )""",
+        """CREATE TABLE IF NOT EXISTS promo_codes (
+            id SERIAL PRIMARY KEY,
+            code TEXT UNIQUE NOT NULL,
+            tier TEXT NOT NULL DEFAULT 'scale',
+            generated_ip TEXT,
+            generated_at TEXT NOT NULL,
+            expires_at TEXT,
+            redeemed_at TEXT,
+            redeemed_by TEXT,
+            FOREIGN KEY (redeemed_by) REFERENCES users(user_id)
+        )""",
     ]
 
     for sql in tables_sql:
@@ -1665,6 +1708,9 @@ def _init_db_postgres(conn):
         "CREATE INDEX IF NOT EXISTS idx_user_sessions_jti ON user_sessions(jti)",
         "CREATE INDEX IF NOT EXISTS idx_user_keys_user ON user_keys(user_id)",
         "CREATE INDEX IF NOT EXISTS idx_user_keys_hash ON user_keys(key_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_promo_code ON promo_codes(code)",
+        "CREATE INDEX IF NOT EXISTS idx_promo_redeemed ON promo_codes(redeemed_by)",
+        "CREATE INDEX IF NOT EXISTS idx_promo_ip ON promo_codes(generated_ip, redeemed_at)",
     ]
 
     for sql in indexes_sql:
