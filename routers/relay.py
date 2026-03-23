@@ -159,30 +159,56 @@ def message_trace(request: Request, message_id: str, agent_id: str = Depends(get
 
 @router.get("/v1/relay/inbox", tags=["Relay"], response_model=RelayInboxResponse)
 @limiter.limit("60/minute")
-def relay_inbox(request: Request, 
+def relay_inbox(
+    request: Request,
     channel: str = "direct",
     unread_only: bool = True,
     limit: int = Query(20, le=100),
-    agent_id: str = Depends(get_agent_id)
+    after: Optional[str] = Query(None, description="Cursor: return messages after this message_id (forward-only pagination)"),
+    agent_id: str = Depends(get_agent_id),
 ):
-    """Check your message inbox."""
+    """Check your message inbox. Use after={message_id} for cursor-based forward pagination."""
     with get_db() as db:
-        if unread_only:
-            rows = db.execute(
+        if after:
+            # Cursor pagination: resolve cursor message's created_at, then fetch newer messages
+            cursor_row = db.execute(
+                "SELECT created_at FROM relay WHERE message_id=? AND to_agent=?",
+                (after, agent_id)
+            ).fetchone()
+            if not cursor_row:
+                # Unknown cursor: return empty (not an error)
+                return {"channel": channel, "messages": [], "count": 0, "next_cursor": None}
+            cursor_ts = cursor_row["created_at"]
+            base_q = (
                 "SELECT message_id, from_agent, channel, payload, created_at FROM relay "
-                "WHERE to_agent=? AND channel=? AND read_at IS NULL ORDER BY created_at DESC LIMIT ?",
-                (agent_id, channel, limit)
-            ).fetchall()
+                "WHERE to_agent=? AND channel=? AND created_at > ? "
+            )
+            params: list = [agent_id, channel, cursor_ts]
+            if unread_only:
+                base_q += "AND read_at IS NULL "
+            base_q += "ORDER BY created_at ASC LIMIT ?"
+            params.append(limit)
+            rows = db.execute(base_q, params).fetchall()
         else:
-            rows = db.execute(
-                "SELECT message_id, from_agent, channel, payload, created_at, read_at FROM relay "
-                "WHERE to_agent=? AND channel=? ORDER BY created_at DESC LIMIT ?",
-                (agent_id, channel, limit)
-            ).fetchall()
+            # No cursor: return most recent messages (backward-compatible behavior)
+            if unread_only:
+                rows = db.execute(
+                    "SELECT message_id, from_agent, channel, payload, created_at FROM relay "
+                    "WHERE to_agent=? AND channel=? AND read_at IS NULL ORDER BY created_at DESC LIMIT ?",
+                    (agent_id, channel, limit)
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    "SELECT message_id, from_agent, channel, payload, created_at, read_at FROM relay "
+                    "WHERE to_agent=? AND channel=? ORDER BY created_at DESC LIMIT ?",
+                    (agent_id, channel, limit)
+                ).fetchall()
+
     messages = [dict(r) for r in rows]
     for m in messages:
         m["payload"] = _decrypt(m["payload"])
-    return {"channel": channel, "messages": messages, "count": len(messages)}
+    next_cursor = messages[-1]["message_id"] if messages else None
+    return {"channel": channel, "messages": messages, "count": len(messages), "next_cursor": next_cursor}
 
 @router.post("/v1/relay/{message_id}/read", tags=["Relay"], response_model=RelayMarkReadResponse)
 @limiter.limit("60/minute")

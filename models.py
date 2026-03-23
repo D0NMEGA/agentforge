@@ -660,6 +660,7 @@ class RelayInboxResponse(BaseModel):
     channel: str
     messages: List[RelayMessageItem]
     count: int
+    next_cursor: Optional[str] = None
 
 class RelayMarkReadResponse(BaseModel):
     message_id: str
