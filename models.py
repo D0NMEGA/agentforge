@@ -684,7 +684,7 @@ class RelayMessageItem(BaseModel):
     read_at: Optional[str] = None
 
 class RelayInboxResponse(BaseModel):
-    channel: str
+    channel: Optional[str] = None
     messages: List[RelayMessageItem]
     count: int
     next_cursor: Optional[str] = None

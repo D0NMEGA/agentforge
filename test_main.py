@@ -376,6 +376,59 @@ class TestRelay:
         _, _, h = register_agent()
         assert client.post("/v1/relay/msg_fake/read", headers=h).status_code == 404
 
+    def test_inbox_all_channels(self):
+        """No channel param returns messages from ALL channels."""
+        id1, _, h1 = register_agent("sender_ac")
+        id2, _, h2 = register_agent("receiver_ac")
+
+        # Send one message on "direct" channel and one on "ops"
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "direct msg", "channel": "direct"}, headers=h1)
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "ops msg", "channel": "ops"}, headers=h1)
+
+        # No channel param should return both
+        inbox = client.get("/v1/relay/inbox", headers=h2)
+        assert inbox.status_code == 200
+        data = inbox.json()
+        assert data["count"] == 2
+        payloads = {m["payload"] for m in data["messages"]}
+        assert "direct msg" in payloads
+        assert "ops msg" in payloads
+
+    def test_inbox_channel_filter(self):
+        """?channel=direct filters to direct-only messages (backward compat)."""
+        id1, _, h1 = register_agent("sender_cf")
+        id2, _, h2 = register_agent("receiver_cf")
+
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "direct msg", "channel": "direct"}, headers=h1)
+        client.post("/v1/relay/send", json={"to_agent": id2, "payload": "ops msg", "channel": "ops"}, headers=h1)
+
+        inbox = client.get("/v1/relay/inbox?channel=direct", headers=h2)
+        assert inbox.status_code == 200
+        data = inbox.json()
+        assert data["count"] == 1
+        assert data["messages"][0]["payload"] == "direct msg"
+
+    def test_inbox_invalid_cursor_400(self):
+        """?after=invalid_cursor returns 400 with error code 'invalid_cursor' in message."""
+        _, _, h = register_agent("cursor_test")
+        r = client.get("/v1/relay/inbox?after=invalid_cursor_xyz", headers=h)
+        assert r.status_code == 400
+        body = r.json()
+        # Error handler wraps detail: check message field contains the error code
+        assert "invalid_cursor" in body.get("message", "")
+
+    def test_inbox_negative_limit_422(self):
+        """?limit=-1 returns 422 (Pydantic validation)."""
+        _, _, h = register_agent("neg_limit")
+        r = client.get("/v1/relay/inbox?limit=-1", headers=h)
+        assert r.status_code == 422
+
+    def test_inbox_zero_limit_422(self):
+        """?limit=0 returns 422 (Pydantic validation)."""
+        _, _, h = register_agent("zero_limit")
+        r = client.get("/v1/relay/inbox?limit=0", headers=h)
+        assert r.status_code == 422
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TEXT UTILITIES
