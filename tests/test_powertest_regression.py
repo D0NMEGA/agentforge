@@ -314,7 +314,169 @@ def test_sec03_self_read_matches_direct(agent_a):
 
 
 # SEC-04: Orphaned data cleanup
-# (3 tests: no orphaned rows, namespace format validation, migration idempotency)
+# (3 tests: no orphaned rows, default namespace reassigned, notes namespace preserved)
+
+import sqlite3
+import tempfile
+import os as _os
+
+
+def _make_migration_db():
+    """Create an isolated in-memory or temp-file SQLite DB with memory + agents + memory_history tables."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    conn = sqlite3.connect(tmp.name)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS agents (
+            agent_id TEXT PRIMARY KEY,
+            api_key_hash TEXT NOT NULL DEFAULT '',
+            name TEXT,
+            created_at TEXT NOT NULL DEFAULT '',
+            owner_id TEXT DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS memory (
+            agent_id TEXT NOT NULL,
+            namespace TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT '',
+            expires_at TEXT,
+            visibility TEXT DEFAULT 'private',
+            shared_agents TEXT,
+            version INTEGER DEFAULT 1,
+            PRIMARY KEY (agent_id, namespace, key)
+        );
+        CREATE TABLE IF NOT EXISTS memory_history (
+            id TEXT PRIMARY KEY,
+            agent_id TEXT NOT NULL,
+            namespace TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT NOT NULL DEFAULT '',
+            version INTEGER NOT NULL DEFAULT 1,
+            changed_by TEXT NOT NULL DEFAULT '',
+            changed_at TEXT NOT NULL DEFAULT ''
+        );
+    """)
+    conn.commit()
+    conn.close()
+    return tmp.name
+
+
+def _run_migration(db_path):
+    """Import and call migration run() with given db_path."""
+    import sys
+    moltgrid_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    if moltgrid_root not in sys.path:
+        sys.path.insert(0, moltgrid_root)
+    from migrations.fix_orphaned_namespaces import run
+    return run(db_path=db_path)
+
+
+def test_sec04_migration_no_orphaned_rows():
+    """SEC-04: After migration, zero rows where namespace encodes a different agent's ID."""
+    db_path = _make_migration_db()
+    try:
+        conn = sqlite3.connect(db_path)
+        # Insert agent_a into agents
+        conn.execute(
+            "INSERT INTO agents (agent_id, api_key_hash, name, created_at) VALUES (?, '', 'Agent A', '')",
+            ("agent_a",),
+        )
+        # Insert a BOLA-exploit row: agent_id=agent_a but namespace=agent:agent_b
+        conn.execute(
+            "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, '', '')",
+            ("agent_a", "agent:agent_b", "bola_key", "stolen_value"),
+        )
+        conn.commit()
+        conn.close()
+
+        counts = _run_migration(db_path)
+
+        conn = sqlite3.connect(db_path)
+        orphaned = conn.execute(
+            "SELECT COUNT(*) FROM memory WHERE namespace LIKE 'agent:%' AND namespace != 'agent:' || agent_id"
+        ).fetchone()[0]
+        conn.close()
+
+        assert orphaned == 0, (
+            f"SEC-04 FAIL: {orphaned} orphaned rows remain after migration (expected 0)"
+        )
+        assert counts["orphaned_after"] == 0
+    finally:
+        _os.unlink(db_path)
+
+
+def test_sec04_migration_default_namespace_reassigned():
+    """SEC-04: Rows with namespace='default' are reassigned to namespace='agent:{agent_id}'."""
+    db_path = _make_migration_db()
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO agents (agent_id, api_key_hash, name, created_at) VALUES (?, '', 'Agent A', '')",
+            ("agent_a",),
+        )
+        conn.execute(
+            "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, '', '')",
+            ("agent_a", "default", "legacy_key", "legacy_value"),
+        )
+        conn.commit()
+        conn.close()
+
+        _run_migration(db_path)
+
+        conn = sqlite3.connect(db_path)
+        default_count = conn.execute(
+            "SELECT COUNT(*) FROM memory WHERE namespace = 'default'"
+        ).fetchone()[0]
+        row = conn.execute(
+            "SELECT namespace FROM memory WHERE key = 'legacy_key' AND agent_id = 'agent_a'"
+        ).fetchone()
+        conn.close()
+
+        assert default_count == 0, (
+            f"SEC-04 FAIL: {default_count} rows still have namespace='default' after migration"
+        )
+        assert row is not None, "SEC-04 FAIL: legacy_key row was deleted instead of reassigned"
+        assert row[0] == "agent:agent_a", (
+            f"SEC-04 FAIL: expected namespace='agent:agent_a', got {row[0]!r}"
+        )
+    finally:
+        _os.unlink(db_path)
+
+
+def test_sec04_migration_preserves_notes_namespace():
+    """SEC-04: Rows with namespace='notes' (tiered memory Tier 2) are left untouched."""
+    db_path = _make_migration_db()
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "INSERT INTO agents (agent_id, api_key_hash, name, created_at) VALUES (?, '', 'Agent A', '')",
+            ("agent_a",),
+        )
+        conn.execute(
+            "INSERT INTO memory (agent_id, namespace, key, value, created_at, updated_at) VALUES (?, ?, ?, ?, '', '')",
+            ("agent_a", "notes", "tier2_note", "important note content"),
+        )
+        conn.commit()
+        conn.close()
+
+        _run_migration(db_path)
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute(
+            "SELECT namespace, value FROM memory WHERE key = 'tier2_note' AND agent_id = 'agent_a'"
+        ).fetchone()
+        conn.close()
+
+        assert row is not None, "SEC-04 FAIL: notes namespace row was deleted by migration"
+        assert row[0] == "notes", (
+            f"SEC-04 FAIL: notes namespace was changed to {row[0]!r} by migration"
+        )
+        assert row[1] == "important note content", "SEC-04 FAIL: notes namespace value was modified"
+    finally:
+        _os.unlink(db_path)
+
 
 # SEC-05: Visibility PATCH for namespaced keys
 # (3 tests: basic PATCH, PATCH with explicit namespace, PATCH private->public)
