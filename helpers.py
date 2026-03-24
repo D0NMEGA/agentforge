@@ -1101,7 +1101,7 @@ def _run_liveness_check():
     with get_db() as db:
         rows = db.execute(
             "SELECT agent_id, heartbeat_at, heartbeat_interval FROM agents "
-            "WHERE heartbeat_at IS NOT NULL AND heartbeat_status != 'offline'"
+            "WHERE heartbeat_at IS NOT NULL AND heartbeat_status NOT IN ('offline', 'deregistered', 'inactive')"
         ).fetchall()
         for row in rows:
             interval = row["heartbeat_interval"] or 60
