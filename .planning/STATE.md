@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: completed
-stopped_at: Completed 47-01-PLAN.md -- pubsub event bus, central publish_event, wildcard matching, lifecycle hooks, 410 tests passing
-last_updated: "2026-03-24T02:10:00.000Z"
-last_activity: "2026-03-24 -- Plan 47-01 complete: publish_event + wildcard + rate limits + lifecycle auto-publishing (EVT-01..05)"
+status: verifying
+stopped_at: Completed 52-01-PLAN.md
+last_updated: "2026-03-24T03:57:40.709Z"
+last_activity: "2026-03-23 -- Plan 50-01 complete: 7-item sidebar consolidation with collapse mode, mobile overlay, active indicators"
 progress:
   total_phases: 12
   completed_phases: 5
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-03-03)
 
 ## Current Position
 
-Phase: 47 (PubSub Event Bus)
+Phase: 50 (Sidebar Consolidation)
 Plan: 01 of 01 in current phase (plan 01 complete)
-Status: TDD GREEN phase complete; 12/12 EventBus tests passing, 410/410 total tests passing
-Last activity: 2026-03-24 -- Plan 47-01 complete: publish_event + wildcard + rate limits + lifecycle auto-publishing (EVT-01..05)
+Status: Verified complete; 7-item sidebar confirmed, all features working
+Last activity: 2026-03-23 -- Plan 50-01 complete: 7-item sidebar consolidation with collapse mode, mobile overlay, active indicators
 
 Progress: [██████████] 100%
 
@@ -59,6 +59,8 @@ Progress: [██████████] 100%
 *Updated after each plan completion*
 | Phase 43-sse-push-cursor-inbox P01 | 32 | 2 tasks | 6 files |
 | Phase 43-sse-push-cursor-inbox P02 | 18 | 2 tasks | 3 files |
+| Phase 49-bug-fixes-design-system P01 | 3 | 5 tasks | 1 files |
+| Phase 50-sidebar-consolidation P01 | 5 | 1 task | 0 files |
 
 ## Accumulated Context
 
@@ -132,6 +134,19 @@ Recent decisions affecting current work:
 - [Phase 47-01]: _pubsub_publish_counts dict in helpers.py -- in-memory sliding window, no DB overhead
 - [Phase 47-01]: patch routers.relay/tasks/memory/directory.publish_event in tests -- not helpers.publish_event -- routers import at module load
 - [Phase 47-01]: source_agent excluded from delivery -- agents do not receive their own published events
+- [Phase 48]: OPS error schema: error=slug, message=detail, request_id, timestamp, retry_after_seconds
+- [Phase 49-01]: BUG-01 (openapi.json) is backend-only - FastAPI serves /docs, no frontend change needed
+- [Phase 49-01]: Command palette nav items must match registered routes in navigate() - #/activity had no handler
+- [Phase 49]: Replace robot emoji with SVG in agents empty-state (no emoji except lobster for OpenClaw)
+- [Phase 49]: All cyan/teal tokens (#64c8ff, #00aaff) replaced with var(--blue) design system token
+- [Phase 50-01]: Sidebar 7 items: ops/agents/overview/network/ecosystem/integrations/settings -- Billing removed, lives in Settings sub-tab
+- [Phase 50-01]: Sidebar collapse default = collapsed (48px icons); logo click = pin/unpin; hover = temporary expand
+- [Phase 50-01]: Mobile breakpoint 768px: sidebar off-canvas, hamburger overlay pattern
+- [Phase 51-01]: Stat card order resequenced to Agents Online (green), Messages/Min (purple), Credits Flowing (yellow), Live Tasks (red) per design spec
+- [Phase 51-01]: Story cards use real overview data from _opsOverview cache; only updated when no event is selected to avoid clobbering detail view
+- [Phase 51-01]: restoreOpsStoryCards() called on all three deselect paths: tree-item toggle, canvas dblclick, canvas node toggle-off
+- [Phase 52-agents-tab-overhaul]: Used server heartbeat_status field rather than client-side time comparison for status dots
+- [Phase 52-agents-tab-overhaul]: Live Event Stream placed first in Console tab; aggregates across first 3 agents when no filter set
 
 ### Pending Todos
 
@@ -143,6 +158,6 @@ None -- Phase 47 Plan 01 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-24T02:10:00.000Z
-Stopped at: Completed 47-01-PLAN.md -- pubsub event bus, central publish_event, wildcard matching, lifecycle hooks, 410 tests passing
+Last session: 2026-03-24T03:57:35.847Z
+Stopped at: Completed 52-01-PLAN.md
 Resume file: None
