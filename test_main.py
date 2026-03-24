@@ -135,7 +135,7 @@ def fresh_db():
             os.remove(DB_PATH)
         init_db()
     _ws_connections.clear()
-    response_cache.clear()
+    response_cache.clear_sync()
     yield
     if _DB_BACKEND == "sqlite":
         if os.path.exists(DB_PATH):

@@ -49,6 +49,11 @@ class LocalTTLCache:
         with self._lock:
             self._store.clear()
 
+    def clear_sync(self) -> None:
+        """Synchronous cache clear for use in test fixtures."""
+        with self._lock:
+            self._store.clear()
+
     def size(self) -> int:
         """Return the number of entries (including possibly expired)."""
         with self._lock:
@@ -159,6 +164,10 @@ class RedisCache:
                     break
         except Exception as e:
             logger.warning(f"Redis CLEAR error: {e}")
+
+    def clear_sync(self) -> None:
+        """Synchronous no-op for Redis (used in test fixtures)."""
+        pass
 
     def size(self) -> int:
         """Not critical for Redis -- return 0."""
