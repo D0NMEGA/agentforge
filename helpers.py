@@ -1194,3 +1194,42 @@ def _run_email_tick():
                     "UPDATE email_queue SET status='failed', error='SMTP error' WHERE id=?",
                     (email_id,)
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 47 -- PUBSUB EVENT BUS (EVT-04)
+# Central publish_event() -- matches event_type against subscriber patterns
+# and fans out via SSE (_queue_agent_event). Call OUTSIDE get_db() blocks.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# In-memory publish rate tracking: agent_id -> list of epoch timestamps (last 60s)
+_pubsub_publish_counts: dict = {}
+
+
+def publish_event(event_type: str, data: dict, source_agent: str = None):
+    """Central event dispatch. Matches event_type against subscriber patterns and delivers via SSE.
+
+    Wildcard matching: 'task.*' matches 'task.status_changed', 'task.created', etc.
+    Uses fnmatch single-level wildcard (*).
+    Call OUTSIDE get_db() blocks -- uses its own standalone connection.
+    """
+    import fnmatch
+    try:
+        conn = get_standalone_conn()
+        rows = conn.execute(
+            "SELECT agent_id, channel FROM pubsub_subscriptions"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return  # Never let event dispatch break callers
+
+    matched_agents: set = set()
+    for row in rows:
+        pattern = row[1] if isinstance(row, (list, tuple)) else row["channel"]
+        sub_agent = row[0] if isinstance(row, (list, tuple)) else row["agent_id"]
+        if fnmatch.fnmatch(event_type, pattern):
+            if sub_agent != source_agent:
+                matched_agents.add(sub_agent)
+
+    for agent_id in matched_agents:
+        _queue_agent_event(agent_id, event_type, data)

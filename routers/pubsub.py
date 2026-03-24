@@ -1,15 +1,17 @@
 """Pub/Sub routes (5 routes)."""
 
 import json
+import re
 import uuid
 import asyncio
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from db import get_db
 from state import _ws_connections
-from helpers import get_agent_id, _encrypt, _fire_webhooks
+from helpers import get_agent_id, _encrypt, _fire_webhooks, publish_event
 from models import (
     PubSubSubscribeRequest, PubSubPublishRequest,
     PubSubSubscribeResponse, PubSubUnsubscribeResponse,
@@ -20,18 +22,41 @@ from rate_limit import limiter
 
 router = APIRouter()
 
+# Wildcard channel pattern validator: alphanumeric, dots, asterisks, hyphens, underscores
+_CHANNEL_PATTERN_RE = re.compile(r'^[\w.\-*]+$')
+
+# Max subscriptions per agent
+_MAX_SUBSCRIPTIONS = 50
+# Max publish events per agent per minute
+_MAX_PUBLISHES_PER_MINUTE = 100
+
 @router.post("/v1/pubsub/subscribe", tags=["Pub/Sub"], response_model=PubSubSubscribeResponse)
 @limiter.limit("60/minute")
 def pubsub_subscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
-    """Subscribe to a broadcast channel."""
+    """Subscribe to a broadcast channel. Supports wildcard patterns (e.g. 'task.*')."""
+    # Validate channel/pattern format
+    if not _CHANNEL_PATTERN_RE.match(req.channel):
+        raise HTTPException(400, "Invalid channel pattern. Use alphanumeric, dots, hyphens, underscores, asterisks.")
+
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
+        # EVT-05: enforce 50 subscription max
+        count = db.execute(
+            "SELECT COUNT(*) as cnt FROM pubsub_subscriptions WHERE agent_id=?",
+            (agent_id,)
+        ).fetchone()
+        current_count = count["cnt"] if count else 0
+
         existing = db.execute(
             "SELECT id FROM pubsub_subscriptions WHERE agent_id=? AND channel=?",
             (agent_id, req.channel)
         ).fetchone()
         if existing:
             return {"channel": req.channel, "status": "already_subscribed"}
+
+        if current_count >= _MAX_SUBSCRIPTIONS:
+            raise HTTPException(429, f"Subscription limit reached ({_MAX_SUBSCRIPTIONS} max per agent).")
+
         db.execute(
             "INSERT INTO pubsub_subscriptions (agent_id, channel, subscribed_at) VALUES (?,?,?)",
             (agent_id, req.channel, now)
@@ -65,7 +90,17 @@ def pubsub_list_subscriptions(request: Request, agent_id: str = Depends(get_agen
 @router.post("/v1/pubsub/publish", tags=["Pub/Sub"], response_model=PubSubPublishResponse)
 @limiter.limit("60/minute")
 async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
-    """Publish a message to all subscribers of a channel."""
+    """Publish an event to all subscribers matching the channel pattern."""
+    # EVT-05: enforce 100 publishes/minute rate limit
+    import helpers as _helpers_mod
+    now_epoch = time.time()
+    publish_history = _helpers_mod._pubsub_publish_counts.get(agent_id, [])
+    publish_history = [t for t in publish_history if now_epoch - t < 60]
+    if len(publish_history) >= _MAX_PUBLISHES_PER_MINUTE:
+        raise HTTPException(429, f"Publish rate limit reached ({_MAX_PUBLISHES_PER_MINUTE} per minute).")
+    publish_history.append(now_epoch)
+    _helpers_mod._pubsub_publish_counts[agent_id] = publish_history
+
     now = datetime.now(timezone.utc).isoformat()
     message_id = f"ps_{uuid.uuid4().hex[:12]}"
 
@@ -113,6 +148,12 @@ async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: 
             "message_id": message_id, "from_agent": agent_id,
             "channel": req.channel, "payload": req.payload,
         })
+
+    # EVT-04: Use central publish_event for SSE fan-out via wildcard pattern matching
+    publish_event(req.channel, {
+        "message_id": message_id, "from_agent": agent_id,
+        "channel": req.channel, "payload": req.payload, "created_at": now,
+    }, source_agent=agent_id)
 
     return {
         "message_id": message_id, "channel": req.channel,

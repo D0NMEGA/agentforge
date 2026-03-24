@@ -5728,3 +5728,217 @@ class TestAccountActivity:
         r = client.get(f"/v1/account/{owner_id}/activity", headers=h)
         assert r.status_code == 200
         assert r.json()["count"] >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 47 -- PUBSUB EVENT BUS (EVT-01..EVT-05)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestEventBusPublishEvent:
+    """EVT-04: Central publish_event() function importable and callable."""
+
+    def test_publish_event_importable(self):
+        """publish_event must be importable from helpers."""
+        from helpers import publish_event
+        assert callable(publish_event)
+
+    def test_publish_event_signature(self):
+        """publish_event accepts event_type, data, source_agent kwargs."""
+        from helpers import publish_event
+        import inspect
+        sig = inspect.signature(publish_event)
+        params = list(sig.parameters.keys())
+        assert "event_type" in params
+        assert "data" in params
+        assert "source_agent" in params
+
+
+class TestEventBusWildcard:
+    """EVT-01: Wildcard pattern matching for subscriptions."""
+
+    def test_subscribe_wildcard_pattern(self):
+        """Subscribe to 'task.*' must be accepted (200/201) without error."""
+        _, _, h = register_agent()
+        r = client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h)
+        assert r.status_code == 200
+
+    def test_wildcard_matches_specific_event(self):
+        """publish_event('task.status_changed') must reach agent subscribed to 'task.*'."""
+        from unittest.mock import patch as mpatch
+        from helpers import publish_event
+
+        agent_id, _, h = register_agent()
+        # Subscribe to wildcard pattern
+        client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h)
+
+        captured = []
+        original_queue = __import__("helpers")._queue_agent_event
+
+        def mock_queue(aid, etype, payload):
+            captured.append((aid, etype))
+
+        with mpatch.object(__import__("helpers"), "_queue_agent_event", mock_queue):
+            publish_event("task.status_changed", {"task_id": "t_test"}, source_agent="other_agent")
+
+        assert any(aid == agent_id for aid, _ in captured), \
+            "Agent subscribed to 'task.*' must receive 'task.status_changed'"
+
+    def test_wildcard_does_not_match_wrong_prefix(self):
+        """Agent subscribed to 'task.*' must NOT receive 'memory.changed'."""
+        from unittest.mock import patch as mpatch
+        from helpers import publish_event
+
+        agent_id, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h)
+
+        captured = []
+
+        def mock_queue(aid, etype, payload):
+            captured.append((aid, etype))
+
+        with mpatch.object(__import__("helpers"), "_queue_agent_event", mock_queue):
+            publish_event("memory.changed", {"key": "x"}, source_agent="other_agent")
+
+        assert not any(aid == agent_id for aid, _ in captured), \
+            "Agent subscribed to 'task.*' must NOT receive 'memory.changed'"
+
+    def test_source_agent_not_notified(self):
+        """publish_event must NOT deliver event back to source_agent."""
+        from unittest.mock import patch as mpatch
+        from helpers import publish_event
+
+        agent_id, _, h = register_agent()
+        client.post("/v1/pubsub/subscribe", json={"channel": "task.*"}, headers=h)
+
+        captured = []
+
+        def mock_queue(aid, etype, payload):
+            captured.append((aid, etype))
+
+        with mpatch.object(__import__("helpers"), "_queue_agent_event", mock_queue):
+            publish_event("task.created", {"task_id": "t_self"}, source_agent=agent_id)
+
+        assert not any(aid == agent_id for aid, _ in captured), \
+            "Source agent must not receive its own published event"
+
+
+class TestEventBusRateLimits:
+    """EVT-05: Rate limits -- 50 subscriptions max, 100 publishes/min."""
+
+    def test_subscribe_limit_50(self):
+        """51st subscription must return 429."""
+        _, _, h = register_agent()
+        for i in range(50):
+            r = client.post("/v1/pubsub/subscribe", json={"channel": f"ch.{i}"}, headers=h)
+            assert r.status_code == 200, f"sub {i} failed: {r.json()}"
+        r51 = client.post("/v1/pubsub/subscribe", json={"channel": "ch.overflow"}, headers=h)
+        assert r51.status_code == 429, f"Expected 429 on 51st sub, got {r51.status_code}"
+
+    def test_publish_rate_limit_429(self):
+        """101st publish in under a minute must return 429."""
+        agent_id, _, h = register_agent()
+        _, _, h2 = register_agent()
+        # h2 subscribes so publishes have at least one recipient
+        client.post("/v1/pubsub/subscribe", json={"channel": "rate.test.*"}, headers=h2)
+
+        # Inject 100 publish timestamps directly so we don't actually send 100 requests
+        import helpers as h_mod
+        import time
+        now = time.time()
+        h_mod._pubsub_publish_counts[agent_id] = [now] * 100
+
+        r = client.post(
+            "/v1/pubsub/publish",
+            json={"channel": "rate.test.chan", "payload": "x"},
+            headers=h,
+        )
+        assert r.status_code == 429, f"Expected 429 on 101st publish, got {r.status_code}"
+
+        # Cleanup
+        h_mod._pubsub_publish_counts.pop(agent_id, None)
+
+
+class TestEventBusAutoPublish:
+    """EVT-03: Platform auto-publishes lifecycle events."""
+
+    def test_message_received_on_relay_send(self):
+        """relay_send must trigger publish_event('message.received')."""
+        from unittest.mock import patch as mpatch
+        from helpers import publish_event as _pe
+
+        agent_a, _, ha = register_agent()
+        agent_b, _, hb = register_agent()
+
+        published = []
+
+        def mock_publish(event_type, data, source_agent=None):
+            published.append(event_type)
+
+        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+            r = client.post(
+                "/v1/relay/send",
+                json={"to_agent": agent_b, "payload": "hello"},
+                headers=ha,
+            )
+        assert r.status_code == 200
+        assert "message.received" in published
+
+    def test_task_status_changed_on_claim(self):
+        """task_claim must trigger publish_event('task.status_changed')."""
+        from unittest.mock import patch as mpatch
+
+        poster, _, hp = register_agent()
+        claimer, _, hc = register_agent()
+        create_r = client.post(
+            "/v1/tasks/create",
+            json={"title": "evt test task", "reward": 0},
+            headers=hp,
+        )
+        assert create_r.status_code == 200
+        task_id = create_r.json()["task_id"]
+
+        published = []
+
+        def mock_publish(event_type, data, source_agent=None):
+            published.append(event_type)
+
+        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+            r = client.post(f"/v1/tasks/{task_id}/claim", headers=hc)
+        assert r.status_code == 200
+        assert "task.status_changed" in published
+
+    def test_memory_changed_on_memory_set(self):
+        """memory_set must trigger publish_event('memory.changed')."""
+        from unittest.mock import patch as mpatch
+
+        _, _, h = register_agent()
+
+        published = []
+
+        def mock_publish(event_type, data, source_agent=None):
+            published.append(event_type)
+
+        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+            r = client.post(
+                "/v1/memory",
+                json={"key": "evt_test_key", "value": "evt_val"},
+                headers=h,
+            )
+        assert r.status_code == 200
+        assert "memory.changed" in published
+
+    def test_agent_health_changed_on_heartbeat(self):
+        """agent_heartbeat must trigger publish_event('agent.health_changed') on status change."""
+        from unittest.mock import patch as mpatch
+
+        agent_id, _, h = register_agent()
+
+        published = []
+
+        def mock_publish(event_type, data, source_agent=None):
+            published.append(event_type)
+
+        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+            r = client.post("/v1/agents/heartbeat", headers=h)
+        assert r.status_code == 200
+        assert "agent.health_changed" in published

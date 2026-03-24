@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: completed
-stopped_at: Completed 43-02-PLAN.md -- cursor inbox + health components live, 344 tests passing
-last_updated: "2026-03-23T21:49:03.346Z"
+stopped_at: Completed 46-01-PLAN.md -- agent registry, A2A cards, account agents/activity, deregistration loop, 398 tests passing
+last_updated: "2026-03-24T01:51:02.967Z"
 last_activity: "2026-03-23 -- Plan 42-02 complete: relay dead-letter, status lifecycle, hop trace, 3 new endpoints"
 progress:
   total_phases: 12
@@ -123,6 +123,9 @@ Recent decisions affecting current work:
 - [Phase 43-02]: cursor resolves to created_at anchor (not lexicographic message_id) since msg_{uuid4} is not time-ordered
 - [Phase 43-02]: unknown cursor returns empty list not error for safe polling by agents that restart
 - [Phase 43-02]: relay degraded threshold is 10 stuck messages older than 5 minutes
+- [Phase 46-01]: GET /v1/agents/{agent_id}/card registered before /{agent_id} catch-all to avoid FastAPI route ambiguity
+- [Phase 46-01]: _record_activity called OUTSIDE get_db blocks (fire-and-forget own connection)
+- [Phase 46-01]: Agent card status computed from heartbeat_at age: active<5min, inactive<1h, deregistered>=1h
 
 ### Pending Todos
 
@@ -134,6 +137,6 @@ None -- Phase 42 Plan 02 complete.
 
 ## Session Continuity
 
-Last session: 2026-03-23T21:48:56.408Z
-Stopped at: Completed 43-02-PLAN.md -- cursor inbox + health components live, 344 tests passing
+Last session: 2026-03-24T01:50:54.907Z
+Stopped at: Completed 46-01-PLAN.md -- agent registry, A2A cards, account agents/activity, deregistration loop, 398 tests passing
 Resume file: None
