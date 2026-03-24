@@ -9,6 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest httpx
+          pip install pytest httpx pytest-timeout
           pip install -r requirements.txt
 
       - name: Run tests
@@ -34,4 +35,5 @@ jobs:
           ADMIN_PASSWORD_HASH: "$2b$12$test_hash_for_ci"
           JWT_SECRET: "ci-test-secret-key-not-for-production"
           ENCRYPTION_KEY: "dGVzdC1lbmNyeXB0aW9uLWtleS0xMjM0NTY3ODkwYWI="
-        run: pytest test_main.py -v --tb=short
+          REDIS_URL: ""
+        run: pytest test_main.py -v --tb=short --timeout=60
