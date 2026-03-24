@@ -34,6 +34,7 @@ from helpers import (
     _scheduler_loop, _uptime_loop, _liveness_loop,
     _usage_reset_loop, _email_loop, _webhook_delivery_loop,
     _task_lease_expiry_loop, _memory_ttl_cleanup_loop,
+    _agent_deregistration_loop,
     _queue_email,  # noqa: F401 -- re-exported for test_main.py mocking
 )
 
@@ -60,7 +61,8 @@ async def lifespan(app):
         threading.Thread(target=_webhook_delivery_loop, daemon=True).start()
         threading.Thread(target=_task_lease_expiry_loop, daemon=True).start()
         threading.Thread(target=_memory_ttl_cleanup_loop, daemon=True).start()
-        logger.info("Leader worker: background threads started (scheduler, uptime, liveness, usage reset, email, webhook delivery, task lease expiry, memory ttl cleanup)")
+        threading.Thread(target=_agent_deregistration_loop, daemon=True).start()
+        logger.info("Leader worker: background threads started (scheduler, uptime, liveness, usage reset, email, webhook delivery, task lease expiry, memory ttl cleanup, agent deregistration)")
     else:
         logger.info("Follower worker: skipping background threads (leader handles them)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions

@@ -5634,65 +5634,97 @@ class TestAgentCard:
 class TestAccountAgents:
     """DISC-03: Account-level agent listing with filters."""
 
+    def _set_owner(self, agent_id: str, owner_id: str):
+        """Directly set owner_id in the test DB."""
+        conn = _get_test_db()
+        conn.execute("UPDATE agents SET owner_id=? WHERE agent_id=?", (owner_id, agent_id))
+        conn.commit()
+        conn.close()
+
     def test_disc03_account_agents_lists_owned_agents(self):
         """DISC-03: GET /v1/account/{id}/agents lists agents for that account."""
-        _, _, h = register_agent()
-        # Get owner via /v1/agents/me or extract from auth
-        # Register to get owner_id
-        me = client.get("/v1/agents/me", headers=h)
-        if me.status_code != 200:
-            pytest.skip("No /v1/agents/me endpoint available")
-        owner_id = me.json().get("owner_id")
-        if not owner_id:
-            pytest.skip("owner_id not available in /v1/agents/me response")
+        agent_id, _, h = register_agent()
+        owner_id = f"user_disc03_{uuid.uuid4().hex[:8]}"
+        self._set_owner(agent_id, owner_id)
         r = client.get(f"/v1/account/{owner_id}/agents", headers=h)
         assert r.status_code == 200
         d = r.json()
         assert "agents" in d
         assert "count" in d
+        assert d["count"] >= 1
+        assert any(a["agent_id"] == agent_id for a in d["agents"])
 
     def test_disc03_account_agents_filter_by_capability(self):
         """DISC-03: capability filter narrows results."""
         agent_id, _, h = register_agent()
+        owner_id = f"user_disc03cap_{uuid.uuid4().hex[:8]}"
+        self._set_owner(agent_id, owner_id)
         client.post("/v1/agents/register", json={"capabilities": ["relay_send"]}, headers=h)
-        me = client.get("/v1/agents/me", headers=h)
-        if me.status_code != 200:
-            pytest.skip("No /v1/agents/me endpoint")
-        owner_id = me.json().get("owner_id")
-        if not owner_id:
-            pytest.skip("owner_id not available")
         r = client.get(f"/v1/account/{owner_id}/agents?capability=relay_send", headers=h)
         assert r.status_code == 200
+        d = r.json()
+        assert d["count"] >= 1
+
+    def test_disc03_account_agents_empty_for_unknown_account(self):
+        """DISC-03: Unknown account returns empty list (not error)."""
+        _, _, h = register_agent()
+        r = client.get("/v1/account/user_nonexistent_account_xyz/agents", headers=h)
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
 
 
 class TestAccountActivity:
     """DISC-06: Account activity feed with cursor pagination."""
 
+    def _insert_activity(self, account_id: str, agent_id: str, action: str):
+        """Directly insert an activity row for testing."""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = _get_test_db()
+        conn.execute(
+            "INSERT INTO account_activity (activity_id, account_id, agent_id, action, details, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (f"act_{uuid.uuid4().hex[:16]}", account_id, agent_id, action, None, now)
+        )
+        conn.commit()
+        conn.close()
+
     def test_disc06_activity_feed_returns_list(self):
         """DISC-06: GET /v1/account/{id}/activity returns activity list."""
         agent_id, _, h = register_agent()
-        # Trigger some activity via register
-        client.post("/v1/agents/register", json={"role": "worker"}, headers=h)
-        me = client.get("/v1/agents/me", headers=h)
-        if me.status_code != 200:
-            pytest.skip("No /v1/agents/me endpoint")
-        owner_id = me.json().get("owner_id")
-        if not owner_id:
-            pytest.skip("owner_id not available")
-        r = client.get(f"/v1/account/{owner_id}/activity", headers=h)
+        account_id = f"user_disc06_{uuid.uuid4().hex[:8]}"
+        self._insert_activity(account_id, agent_id, "test_action")
+        r = client.get(f"/v1/account/{account_id}/activity", headers=h)
         assert r.status_code == 200
         d = r.json()
         assert "activities" in d
         assert "count" in d
+        assert d["count"] >= 1
 
     def test_disc06_activity_cursor_pagination(self):
-        """DISC-06: after= cursor parameter works."""
+        """DISC-06: after= cursor parameter accepts a timestamp and returns 200."""
         agent_id, _, h = register_agent()
-        me = client.get("/v1/agents/me", headers=h)
-        if me.status_code != 200:
-            pytest.skip("No /v1/agents/me endpoint")
-        owner_id = me.json().get("owner_id")
-        if not owner_id:
-            pytest.skip("owner_id not available")
-        r = client.get(f"/v1/account/{owner_id}/activity?limit=1", headers=h)
+        account_id = f"user_disc06pg_{uuid.uuid4().hex[:8]}"
+        self._insert_activity(account_id, agent_id, "action_a")
+        self._insert_activity(account_id, agent_id, "action_b")
+        # First page
+        r1 = client.get(f"/v1/account/{account_id}/activity?limit=1", headers=h)
+        assert r1.status_code == 200
+        d1 = r1.json()
+        assert d1["count"] == 1
+        # Use next_cursor if present, else use a far-future anchor
+        cursor = d1.get("next_cursor") or "2099-01-01T00:00:00+00:00"
+        r2 = client.get(f"/v1/account/{account_id}/activity?after={cursor}", headers=h)
+        assert r2.status_code == 200
+
+    def test_disc06_register_writes_activity(self):
+        """DISC-06: POST /v1/agents/register writes activity when owner_id set."""
+        agent_id, _, h = register_agent()
+        owner_id = f"user_disc06wr_{uuid.uuid4().hex[:8]}"
+        conn = _get_test_db()
+        conn.execute("UPDATE agents SET owner_id=? WHERE agent_id=?", (owner_id, agent_id))
+        conn.commit()
+        conn.close()
+        client.post("/v1/agents/register", json={"role": "tester"}, headers=h)
+        r = client.get(f"/v1/account/{owner_id}/activity", headers=h)
         assert r.status_code == 200
+        assert r.json()["count"] >= 1

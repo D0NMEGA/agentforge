@@ -12,13 +12,14 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from db import get_db
 from async_db import async_db_fetchall, async_db_fetchone, async_db_execute
 from cache import response_cache
-from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text
+from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text, _queue_agent_event, _record_activity
 from models import (
     HeartbeatRequest, DirectoryUpdateRequest, StatusUpdateRequest, CollaborationRequest,
     HeartbeatResponse, DirectoryUpdateResponse, DirectoryListResponse,
     LeaderboardResponse, DirectoryStatsResponse, DirectorySearchResponse,
     DirectoryStatusUpdateResponse, CollaborationResponse, DirectoryMatchResponse,
     DirectoryNetworkResponse, DirectoryProfileResponse,
+    AgentRegisterRequest, AgentCardResponse, AccountAgentsResponse, AccountActivityResponse,
 )
 
 from rate_limit import limiter
@@ -490,6 +491,159 @@ def directory_network(request: Request):
         "nodes": nodes, "edges": edges,
         "stats": {"total_agents": len(nodes), "online_agents": online_count, "total_edges": len(edges)}
     }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT REGISTRY + DISCOVERY (Phase 46 -- DISC-01 through DISC-06)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/v1/agents/register", tags=["Registry"])
+@limiter.limit("30/minute")
+def agent_register(request: Request, req: AgentRegisterRequest, agent_id: str = Depends(get_agent_id)):
+    """Register or update this agent's capabilities, skills, and role. DISC-02."""
+    now = datetime.now(timezone.utc).isoformat()
+    updates = ["registered_at=?"]
+    params: list = [now]
+    if req.role is not None:
+        updates.append("role=?")
+        params.append(req.role)
+    if req.capabilities is not None:
+        updates.append("capabilities=?")
+        params.append(json.dumps(req.capabilities))
+    if req.skills is not None:
+        updates.append("skills=?")
+        params.append(json.dumps(req.skills))
+    params.append(agent_id)
+    with get_db() as db:
+        db.execute(f"UPDATE agents SET {', '.join(updates)} WHERE agent_id=?", params)
+        row = db.execute(
+            "SELECT agent_id, name, role, capabilities, skills, owner_id FROM agents WHERE agent_id=?",
+            (agent_id,)
+        ).fetchone()
+    owner_id = row["owner_id"] if row else None
+    _record_activity(owner_id, agent_id, "agent_register", f"role={req.role}")
+    _queue_agent_event(agent_id, "agent_registered", {
+        "role": req.role,
+        "capabilities": req.capabilities,
+        "skills": req.skills,
+    })
+    return {
+        "agent_id": agent_id,
+        "role": row["role"] if row else req.role,
+        "capabilities": json.loads(row["capabilities"]) if row and row["capabilities"] else req.capabilities or [],
+        "skills": json.loads(row["skills"]) if row and row["skills"] else req.skills or [],
+        "registered_at": now,
+    }
+
+
+@router.get("/v1/agents/{agent_id}/card", response_model=AgentCardResponse, tags=["Registry"])
+@limiter.limit("30/minute")
+def agent_card(request: Request, agent_id: str):
+    """Return an A2A-style Agent Card for a given agent. DISC-04. No auth required."""
+    with get_db() as db:
+        row = db.execute(
+            "SELECT agent_id, name, display_name, role, capabilities, skills, "
+            "heartbeat_at, heartbeat_status, created_at FROM agents WHERE agent_id=?",
+            (agent_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Agent not found")
+    now = datetime.now(timezone.utc)
+    last_seen = row["heartbeat_at"]
+    status = "unknown"
+    if last_seen:
+        try:
+            last_seen_dt = datetime.fromisoformat(last_seen.replace("Z", "+00:00"))
+            if last_seen_dt.tzinfo is None:
+                last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
+            delta = (now - last_seen_dt).total_seconds()
+            if delta < 300:
+                status = "active"
+            elif delta < 3600:
+                status = "inactive"
+            else:
+                status = "deregistered"
+        except Exception:
+            status = row["heartbeat_status"] or "unknown"
+    else:
+        status = row["heartbeat_status"] or "unknown"
+    return AgentCardResponse(
+        agent_id=row["agent_id"],
+        name=row["name"],
+        display_name=row["display_name"],
+        role=row["role"],
+        capabilities=json.loads(row["capabilities"]) if row["capabilities"] else [],
+        skills=json.loads(row["skills"]) if row["skills"] else [],
+        status=status,
+        endpoint_url=f"https://api.moltgrid.net/v1/agents/{agent_id}",
+        created_at=row["created_at"],
+        last_seen=last_seen,
+    )
+
+
+@router.get("/v1/account/{account_id}/agents", response_model=AccountAgentsResponse, tags=["Registry"])
+@limiter.limit("30/minute")
+def account_agents(
+    request: Request,
+    account_id: str,
+    capability: Optional[str] = None,
+    role: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    agent_id: str = Depends(get_agent_id),
+):
+    """List agents owned by a given account. Filter by capability and/or role. DISC-03."""
+    conditions = ["owner_id=?"]
+    params: list = [account_id]
+    if capability:
+        conditions.append("capabilities LIKE ?")
+        params.append(f"%{capability}%")
+    if role:
+        conditions.append("role=?")
+        params.append(role)
+    params.append(limit)
+    where = " AND ".join(conditions)
+    with get_db() as db:
+        rows = db.execute(
+            f"SELECT agent_id, name, display_name, role, capabilities, skills, "
+            f"heartbeat_status, available, created_at FROM agents WHERE {where} LIMIT ?",
+            params
+        ).fetchall()
+    agents = []
+    for r in rows:
+        d = dict(r)
+        d["capabilities"] = json.loads(d["capabilities"]) if d["capabilities"] else []
+        d["skills"] = json.loads(d["skills"]) if d["skills"] else []
+        d["available"] = bool(d.get("available", 1))
+        agents.append(d)
+    return {"agents": agents, "count": len(agents)}
+
+
+@router.get("/v1/account/{account_id}/activity", response_model=AccountActivityResponse, tags=["Registry"])
+@limiter.limit("30/minute")
+def account_activity(
+    request: Request,
+    account_id: str,
+    after: Optional[str] = Query(None, description="Cursor: created_at of last seen item"),
+    limit: int = Query(50, le=200),
+    agent_id: str = Depends(get_agent_id),
+):
+    """Cursor-paginated account activity feed. DISC-06."""
+    params: list = [account_id]
+    base_sql = "SELECT activity_id, agent_id, action, details, created_at FROM account_activity WHERE account_id=?"
+    if after:
+        base_sql += " AND created_at < ?"
+        params.append(after)
+    base_sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    with get_db() as db:
+        rows = db.execute(base_sql, params).fetchall()
+    activities = [dict(r) for r in rows]
+    next_cursor = activities[-1]["created_at"] if len(activities) == limit else None
+    return {
+        "activities": activities,
+        "count": len(activities),
+        "next_cursor": next_cursor,
+    }
+
 
 @router.get("/v1/directory/{agent_id}", response_model=DirectoryProfileResponse, tags=["Directory"])
 @limiter.limit("30/minute")
