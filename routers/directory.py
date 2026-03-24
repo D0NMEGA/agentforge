@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from db import get_db
 from async_db import async_db_fetchall, async_db_fetchone, async_db_execute
 from cache import response_cache
-from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text, _queue_agent_event, _record_activity
+from helpers import get_agent_id, _encrypt, _decrypt, _sanitize_text, _queue_agent_event, _record_activity, publish_event
 from models import (
     HeartbeatRequest, DirectoryUpdateRequest, StatusUpdateRequest, CollaborationRequest,
     HeartbeatResponse, DirectoryUpdateResponse, DirectoryListResponse,
@@ -41,6 +41,10 @@ async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatReq
         "UPDATE agents SET heartbeat_at=?, heartbeat_status=?, heartbeat_meta=?, worker_status=? WHERE agent_id=?",
         (now, req.status, meta_json, worker_status, agent_id)
     )
+    # EVT-03: Auto-publish agent.health_changed lifecycle event OUTSIDE get_db block
+    publish_event("agent.health_changed", {
+        "agent_id": agent_id, "status": req.status or "session_based", "heartbeat_at": now,
+    }, source_agent=agent_id)
     return {"agent_id": agent_id, "status": req.status, "heartbeat_at": now}
 
 

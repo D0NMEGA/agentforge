@@ -5864,7 +5864,7 @@ class TestEventBusAutoPublish:
     def test_message_received_on_relay_send(self):
         """relay_send must trigger publish_event('message.received')."""
         from unittest.mock import patch as mpatch
-        from helpers import publish_event as _pe
+        import routers.relay as relay_mod
 
         agent_a, _, ha = register_agent()
         agent_b, _, hb = register_agent()
@@ -5874,7 +5874,7 @@ class TestEventBusAutoPublish:
         def mock_publish(event_type, data, source_agent=None):
             published.append(event_type)
 
-        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+        with mpatch.object(relay_mod, "publish_event", mock_publish):
             r = client.post(
                 "/v1/relay/send",
                 json={"to_agent": agent_b, "payload": "hello"},
@@ -5886,11 +5886,12 @@ class TestEventBusAutoPublish:
     def test_task_status_changed_on_claim(self):
         """task_claim must trigger publish_event('task.status_changed')."""
         from unittest.mock import patch as mpatch
+        import routers.tasks as tasks_mod
 
         poster, _, hp = register_agent()
         claimer, _, hc = register_agent()
         create_r = client.post(
-            "/v1/tasks/create",
+            "/v1/tasks",
             json={"title": "evt test task", "reward": 0},
             headers=hp,
         )
@@ -5902,7 +5903,7 @@ class TestEventBusAutoPublish:
         def mock_publish(event_type, data, source_agent=None):
             published.append(event_type)
 
-        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+        with mpatch.object(tasks_mod, "publish_event", mock_publish):
             r = client.post(f"/v1/tasks/{task_id}/claim", headers=hc)
         assert r.status_code == 200
         assert "task.status_changed" in published
@@ -5910,6 +5911,7 @@ class TestEventBusAutoPublish:
     def test_memory_changed_on_memory_set(self):
         """memory_set must trigger publish_event('memory.changed')."""
         from unittest.mock import patch as mpatch
+        import routers.memory as memory_mod
 
         _, _, h = register_agent()
 
@@ -5918,7 +5920,7 @@ class TestEventBusAutoPublish:
         def mock_publish(event_type, data, source_agent=None):
             published.append(event_type)
 
-        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+        with mpatch.object(memory_mod, "publish_event", mock_publish):
             r = client.post(
                 "/v1/memory",
                 json={"key": "evt_test_key", "value": "evt_val"},
@@ -5930,6 +5932,7 @@ class TestEventBusAutoPublish:
     def test_agent_health_changed_on_heartbeat(self):
         """agent_heartbeat must trigger publish_event('agent.health_changed') on status change."""
         from unittest.mock import patch as mpatch
+        import routers.directory as directory_mod
 
         agent_id, _, h = register_agent()
 
@@ -5938,7 +5941,7 @@ class TestEventBusAutoPublish:
         def mock_publish(event_type, data, source_agent=None):
             published.append(event_type)
 
-        with mpatch.object(__import__("helpers"), "publish_event", mock_publish):
+        with mpatch.object(directory_mod, "publish_event", mock_publish):
             r = client.post("/v1/agents/heartbeat", headers=h)
         assert r.status_code == 200
         assert "agent.health_changed" in published

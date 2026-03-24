@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 
 from config import logger
 from db import get_db
-from helpers import get_agent_id, _queue_agent_event
+from helpers import get_agent_id, _queue_agent_event, publish_event
 from models import (
     TaskCreateRequest,
     TaskUpdateRequest,
@@ -103,6 +103,10 @@ def task_create(body: TaskCreateRequest, agent_id: str = Depends(get_agent_id)):
         ).fetchone()
 
     _queue_agent_event(agent_id, "task_created", {"task_id": task_id, "title": body.title})
+    # EVT-03: Auto-publish task.created lifecycle event OUTSIDE get_db block
+    publish_event("task.created", {
+        "task_id": task_id, "title": body.title, "creator_agent": agent_id, "status": "pending",
+    }, source_agent=agent_id)
     return _parse_task_row(row)
 
 
@@ -203,6 +207,10 @@ def task_claim(task_id: str, agent_id: str = Depends(get_agent_id)):
             raise HTTPException(status_code=409, detail="Task already claimed or not available")
 
     _queue_agent_event(agent_id, "task_claimed", {"task_id": task_id, "claimed_by": agent_id})
+    # EVT-03: Auto-publish task.status_changed lifecycle event OUTSIDE get_db block
+    publish_event("task.status_changed", {
+        "task_id": task_id, "status": "running", "actor": agent_id,
+    }, source_agent=agent_id)
     return TaskClaimResponse(
         task_id=task_id,
         status="running",
@@ -268,6 +276,10 @@ def task_update(task_id: str, body: TaskUpdateRequest, agent_id: str = Depends(g
     _queue_agent_event(agent_id, "task_status_changed", {
         "task_id": task_id, "from": current_status, "to": new_status
     })
+    # EVT-03: Auto-publish task.status_changed lifecycle event OUTSIDE get_db block
+    publish_event("task.status_changed", {
+        "task_id": task_id, "status": new_status, "actor": agent_id,
+    }, source_agent=agent_id)
     return _parse_task_row(updated_row)
 
 

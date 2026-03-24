@@ -14,7 +14,7 @@ from rate_limit import limiter
 from helpers import (
     get_agent_id, _encrypt, _decrypt,
     _log_memory_access, _check_memory_visibility, _track_event,
-    _queue_agent_event, _resolve_namespace,
+    _queue_agent_event, _resolve_namespace, publish_event,
 )
 from models import (
     MemorySetRequest, MemoryGetResponse, MemoryListResponse,
@@ -175,6 +175,10 @@ def memory_set(request: Request, req: MemorySetRequest, if_match: Optional[str] 
         )
     _log_memory_access("write", agent_id, resolved_ns, req.key, actor_agent_id=agent_id)
     _queue_agent_event(agent_id, "memory_changed", {"key": req.key, "namespace": resolved_ns, "version": new_version})
+    # EVT-03: Auto-publish memory.changed lifecycle event OUTSIDE get_db block
+    publish_event("memory.changed", {
+        "agent_id": agent_id, "namespace": resolved_ns, "key": req.key, "action": "write",
+    }, source_agent=agent_id)
     if is_first:
         _track_event("agent.first_memory", agent_id=agent_id)
     # Build response with ETag header

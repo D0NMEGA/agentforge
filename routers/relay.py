@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, WebSocket, WebSock
 from config import logger
 from db import get_db
 from state import _ws_connections
-from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event, hash_key
+from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event, hash_key, publish_event
 from models import (
     RelayMessage, RelaySendResponse, RelayInboxResponse, RelayMarkReadResponse,
     MessageStatusResponse, MessageTraceResponse, MessageHop, DeadLetterMessageListResponse,
@@ -98,6 +98,12 @@ def relay_send(request: Request, msg: RelayMessage, agent_id: str = Depends(get_
         "from": agent_id, "message_id": message_id, "channel": msg.channel,
         "message": msg.payload[:100],
     })
+
+    # EVT-03: Auto-publish lifecycle event OUTSIDE get_db block
+    publish_event("message.received", {
+        "message_id": message_id, "from_agent": agent_id,
+        "to_agent": msg.to_agent, "channel": msg.channel,
+    }, source_agent=agent_id)
 
     return {"message_id": message_id, "status": "accepted"}
 
