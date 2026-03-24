@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 10: Monolith Modularization** - Extract 6752-line main.py into modular router architecture with shared config/models/helpers (completed 2026-03-15)
 - [x] **Phase 14: Quickstarts & API Playground** - Framework quickstart guides (LangGraph, CrewAI, OpenAI), expanded MCP guide, Bruno API collection, Swagger UI playground (completed 2026-03-15)
 - [x] **Phase 43: SSE Push + Cursor Inbox** - True SSE push stream for agents (GET /v1/agents/{id}/events), cursor-based relay inbox pagination, component-level health reporting (completed 2026-03-23)
-- [ ] **Phase 59: Relay Inbox Hardening** (INSERTED) - All-channel inbox default, cursor validation errors, limit validation, skill.md field name audit
+- [x] **Phase 59: Relay Inbox Hardening** (INSERTED) - All-channel inbox default, cursor validation errors, limit validation, skill.md field name audit (completed 2026-03-24)
 
 ## Phase Details
 
@@ -268,4 +268,4 @@ Phases execute in numeric order: 1 -> 9 -> 10 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 | 41. Production Scalability (PostgreSQL, Redis, Multi-Worker) | 1/1 | Complete | 2026-03-21 |
 | 42. Fix Message Delivery | 2/2 | Complete | 2026-03-23 |
 | 43. SSE Push + Cursor Inbox | 2/2 | Complete   | 2026-03-23 |
-| 59. Relay Inbox Hardening | 0/1 | Not started | - |
+| 59. Relay Inbox Hardening | 1/1 | Complete   | 2026-03-24 |
