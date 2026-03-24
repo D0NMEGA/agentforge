@@ -436,6 +436,47 @@ def _queue_agent_event(agent_id: str, event_type: str, payload: dict):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TASK LEASE EXPIRY (Phase 44)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _task_lease_expiry_loop():
+    """Reclaim tasks with expired leases every 60 seconds.
+
+    Resets status='running' tasks whose lease_expires_at is in the past back to
+    status='pending' so another agent can claim them. Appends 'system_lease_expiry'
+    to history for audit trail. Best-effort -- exceptions are swallowed.
+    """
+    while True:
+        time.sleep(60)
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            with get_db() as db:
+                expired = db.execute(
+                    "SELECT task_id, claimed_by FROM agent_tasks "
+                    "WHERE status='running' AND lease_expires_at IS NOT NULL AND lease_expires_at < ?",
+                    (now,),
+                ).fetchall()
+                for task in expired:
+                    history_raw = db.execute(
+                        "SELECT history FROM agent_tasks WHERE task_id=?", (task["task_id"],)
+                    ).fetchone()["history"]
+                    history = json.loads(history_raw if history_raw else "[]")
+                    history.append({
+                        "status": "pending",
+                        "actor": "system_lease_expiry",
+                        "timestamp": now,
+                    })
+                    db.execute(
+                        "UPDATE agent_tasks SET status='pending', claimed_by=NULL, "
+                        "claimed_at=NULL, lease_expires_at=NULL, updated_at=?, history=? "
+                        "WHERE task_id=?",
+                        (now, json.dumps(history), task["task_id"]),
+                    )
+        except Exception:
+            pass  # Best-effort background task
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MEMORY VISIBILITY
 # ═══════════════════════════════════════════════════════════════════════════════
 

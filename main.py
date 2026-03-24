@@ -33,6 +33,7 @@ from helpers import (
     _check_auth_rate_limit, _uptime_check, _get_embed_model,
     _scheduler_loop, _uptime_loop, _liveness_loop,
     _usage_reset_loop, _email_loop, _webhook_delivery_loop,
+    _task_lease_expiry_loop,
     _queue_email,  # noqa: F401 -- re-exported for test_main.py mocking
 )
 
@@ -57,7 +58,8 @@ async def lifespan(app):
         threading.Thread(target=_usage_reset_loop, daemon=True).start()
         threading.Thread(target=_email_loop, daemon=True).start()
         threading.Thread(target=_webhook_delivery_loop, daemon=True).start()
-        logger.info("Leader worker: background threads started (scheduler, uptime, liveness, usage reset, email, webhook delivery)")
+        threading.Thread(target=_task_lease_expiry_loop, daemon=True).start()
+        logger.info("Leader worker: background threads started (scheduler, uptime, liveness, usage reset, email, webhook delivery, task lease expiry)")
     else:
         logger.info("Follower worker: skipping background threads (leader handles them)")
     # Clear OpenAPI schema cache to prevent stale endpoint definitions
@@ -410,7 +412,8 @@ from routers import pubsub, integrations, sessions, events, orgs, admin, system 
 from routers import tiered_memory, user                                     # noqa: E402
 from routers import chat_gateway                                             # noqa: E402
 from routers import sse                                                      # noqa: E402
-from routers import promo                                                     # noqa: E402
+from routers import promo                                                    # noqa: E402
+from routers import tasks                                                    # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(dashboard.router)
@@ -435,6 +438,7 @@ app.include_router(user.router)
 app.include_router(chat_gateway.router)
 app.include_router(sse.router)
 app.include_router(promo.router)
+app.include_router(tasks.router)
 
 
 # ─── Re-exports for test_main.py compatibility (ZERO test modifications) ────
