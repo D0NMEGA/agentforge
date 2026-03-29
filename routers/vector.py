@@ -181,7 +181,7 @@ def vector_list(request: Request, namespace: str = "default", limit: int = Query
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class SharedMemorySetRequest(BaseModel):
-    namespace: str = Field(..., max_length=64, description="Public namespace name")
+    namespace: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_\-\.]+$", description="Public namespace name")
     key: str = Field(..., max_length=256)
     value: str = Field(..., max_length=MAX_MEMORY_VALUE_SIZE)
     description: Optional[str] = Field(None, max_length=256, description="Human-readable description of this entry")
@@ -191,6 +191,10 @@ class SharedMemorySetRequest(BaseModel):
 @limiter.limit("60/minute")
 def shared_memory_set(request: Request, req: SharedMemorySetRequest, agent_id: str = Depends(get_agent_id)):
     """Publish a key-value pair to a shared namespace that other agents can read."""
+    # Block reserved namespace prefixes (defense-in-depth -- regex also blocks colons)
+    ns_lower = req.namespace.lower()
+    if ns_lower.startswith("agent:") or ns_lower.startswith("system:"):
+        raise HTTPException(403, "Reserved namespace prefix")
     now = datetime.now(timezone.utc)
     expires = None
     if req.ttl_seconds:

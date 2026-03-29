@@ -23,6 +23,33 @@ from pydantic import BaseModel
 from models import AdminLoginRequest, AdminEmailRequest
 
 from rate_limit import limiter
+import time as _time
+
+# Progressive lockout: 5 failures per IP -> 429 for 15 minutes
+_admin_lockout: dict[str, list[float]] = {}
+_ADMIN_LOCKOUT_MAX = 5
+_ADMIN_LOCKOUT_WINDOW = 900  # 15 minutes in seconds
+
+
+def _check_admin_lockout(request):
+    """Block admin login if IP has 5+ failures in 15 minutes."""
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    now = _time.time()
+    attempts = _admin_lockout.get(ip, [])
+    attempts = [t for t in attempts if now - t < _ADMIN_LOCKOUT_WINDOW]
+    _admin_lockout[ip] = attempts
+    if len(attempts) >= _ADMIN_LOCKOUT_MAX:
+        raise HTTPException(429, "Too many failed login attempts. Try again later.")
+
+
+def _record_admin_failure(request):
+    """Record a failed admin login attempt."""
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    now = _time.time()
+    attempts = _admin_lockout.get(ip, [])
+    attempts = [t for t in attempts if now - t < _ADMIN_LOCKOUT_WINDOW]
+    attempts.append(now)
+    _admin_lockout[ip] = attempts
 
 router = APIRouter()
 
@@ -73,20 +100,23 @@ def _verify_admin_session(admin_token: str = Cookie(None)) -> bool:
     return True
 
 @router.post("/admin/api/login", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit("5/minute")
 def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     """Authenticate admin and set session cookie."""
     _check_auth_rate_limit(request)
+    _check_admin_lockout(request)
     if not ADMIN_PASSWORD_HASH:
         raise HTTPException(503, "Admin not configured. Set ADMIN_PASSWORD_HASH env var.")
     # Support bcrypt hashes (start with $2) with SHA-256 fallback for backward compat
     if ADMIN_PASSWORD_HASH.startswith("$2"):
         if not _bcrypt.checkpw(req.password.encode(), ADMIN_PASSWORD_HASH.encode()):
-            raise HTTPException(401, "Invalid password")
+            _record_admin_failure(request)
+            raise HTTPException(401, "Invalid credentials")
     else:
         incoming_hash = hashlib.sha256(req.password.encode()).hexdigest()
         if not _hmac.compare_digest(incoming_hash, ADMIN_PASSWORD_HASH):
-            raise HTTPException(401, "Invalid password")
+            _record_admin_failure(request)
+            raise HTTPException(401, "Invalid credentials")
     token = secrets.token_urlsafe(48)
     expires_at = time.time() + ADMIN_SESSION_TTL
     with get_db() as db:

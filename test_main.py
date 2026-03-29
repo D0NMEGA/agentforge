@@ -1033,7 +1033,7 @@ class TestDirectory:
         assert data["description"] == "I am a helpful bot"
         assert data["capabilities"] == ["nlp", "search"]
         assert data["reputation"] == 0.0
-        assert data["credits"] == 200  # Default credits
+        assert data["credits"] == 50  # Default credits (reduced from 200 in SEC2-03)
         assert data["tasks_completed"] == 2
         assert "member_since" in data
         assert len(data["recent_marketplace_activity"]) == 2
@@ -1194,7 +1194,7 @@ class TestDirectory:
         assert nlp_cap["count"] == 2  # Both public agents have NLP
 
         assert data["total_marketplace_tasks"] == 1
-        assert data["total_credits_distributed"] == 400  # 200 per public agent
+        assert data["total_credits_distributed"] == 100  # 50 per public agent
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1529,15 +1529,15 @@ class TestMarketplace:
     def test_review_accept_awards_credits(self):
         _, _, h1 = register_agent()
         aid2, _, h2 = register_agent()
-        task = client.post("/v1/marketplace/tasks", json={"title": "Review test", "reward_credits": 100}, headers=h1).json()
+        task = client.post("/v1/marketplace/tasks", json={"title": "Review test", "reward_credits": 25}, headers=h1).json()
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/claim", headers=h2)
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/deliver", json={"result": "output"}, headers=h2)
         r = client.post(f"/v1/marketplace/tasks/{task['task_id']}/review", json={"accept": True, "rating": 5}, headers=h1)
         assert r.status_code == 200
         assert r.json()["status"] == "completed"
-        assert r.json()["credits_awarded"] == 100
+        assert r.json()["credits_awarded"] == 25
         stats = client.get("/v1/stats", headers=h2).json()
-        assert stats["credits"] == 300  # 200 starting + 100 reward
+        assert stats["credits"] == 75  # 50 starting + 25 reward
 
     def test_review_reject_reopens(self):
         _, _, h1 = register_agent()
@@ -1569,7 +1569,7 @@ class TestMarketplace:
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/deliver", json={"result": "ok"}, headers=h2)
         client.post(f"/v1/marketplace/tasks/{task['task_id']}/review", json={"accept": True, "rating": 4}, headers=h1)
         profile = client.get("/v1/directory/me", headers=h2).json()
-        assert profile["credits"] == 225  # 200 starting + 25 reward
+        assert profile["credits"] == 75  # 50 starting + 25 reward
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6300,24 +6300,26 @@ class TestSecurityFixes:
     # --- SEC2-02: Shared memory namespace injection ---
 
     def test_namespace_injection_agent_prefix(self):
-        """POST /v1/shared-memory with namespace='agent:other_id' must return 403."""
+        """POST /v1/shared-memory with namespace='agent:other_id' must be rejected (403 or 422)."""
         _, _, h = register_agent("ns-inject-agent")
         r = client.post("/v1/shared-memory", json={
             "namespace": "agent:other_id",
             "key": "exploit",
             "value": "pwned",
         }, headers=h)
-        assert r.status_code == 403
+        # Colon in namespace is rejected by Pydantic regex (422) or runtime prefix check (403)
+        assert r.status_code in (403, 422), f"Expected 403 or 422, got {r.status_code}"
 
     def test_namespace_injection_system_prefix(self):
-        """POST /v1/shared-memory with namespace='system:admin' must return 403."""
+        """POST /v1/shared-memory with namespace='system:admin' must be rejected (403 or 422)."""
         _, _, h = register_agent("ns-inject-system")
         r = client.post("/v1/shared-memory", json={
             "namespace": "system:admin",
             "key": "exploit",
             "value": "pwned",
         }, headers=h)
-        assert r.status_code == 403
+        # Colon in namespace is rejected by Pydantic regex (422) or runtime prefix check (403)
+        assert r.status_code in (403, 422), f"Expected 403 or 422, got {r.status_code}"
 
     def test_namespace_valid(self):
         """POST /v1/shared-memory with valid namespace must return 200."""
@@ -6361,9 +6363,10 @@ class TestSecurityFixes:
         r = client.post("/admin/api/login", json={"password": "wrong-password-123"})
         assert r.status_code == 401
         body = r.json()
-        detail = body.get("detail", "")
-        assert "Invalid credentials" in detail, f"Expected 'Invalid credentials', got: {detail}"
-        assert "Invalid password" not in detail, "Error message leaks that password is the wrong field"
+        # Custom exception handler uses 'message' field, fallback to 'detail'
+        msg = body.get("message", "") or body.get("detail", "")
+        assert "Invalid credentials" in msg, f"Expected 'Invalid credentials', got: {msg}"
+        assert "Invalid password" not in msg, "Error message leaks that password is the wrong field"
 
     def test_admin_lockout_after_5_failures(self):
         """After 5 failed admin logins from same IP, 6th attempt must return 429."""

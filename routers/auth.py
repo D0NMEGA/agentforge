@@ -610,7 +610,7 @@ WELCOME_MESSAGE = (
 )
 
 @router.post("/v1/register", response_model=RegisterResponse, tags=["Auth"])
-@limiter.limit("10/minute")
+@limiter.limit("3/hour")
 def register_agent(req: RegisterRequest, request: Request, owner_id: Optional[str] = Depends(get_optional_user_id)):
     """Register a new agent and receive an API key. Free. No payment required.
     If a Bearer token is provided, the agent is linked to that user account."""
@@ -648,7 +648,7 @@ def register_agent(req: RegisterRequest, request: Request, owner_id: Optional[st
                     )
 
         db.execute(
-            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits, owner_id) VALUES (?, ?, ?, 1, ?, 200, ?)",
+            "INSERT INTO agents (agent_id, api_key_hash, name, public, created_at, credits, owner_id) VALUES (?, ?, ?, 1, ?, 50, ?)",
             (agent_id, hash_key(api_key), req.name, now, owner_id),
         )
 

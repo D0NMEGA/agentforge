@@ -793,6 +793,8 @@ def _send_email_smtp(to_email: str, subject: str, body_html: str, from_display: 
 WEBHOOK_EVENT_TYPES = {"message.received", "message.broadcast", "job.completed", "job.failed", "marketplace.task.claimed", "marketplace.task.delivered", "marketplace.task.completed"}
 WEBHOOK_TIMEOUT = 5.0  # seconds
 
+_ALLOWED_SCHEMES = {"http", "https"}
+
 _BLOCKED_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
@@ -800,20 +802,40 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("0.0.0.0/32"),
+    ipaddress.ip_network("::1/128"),       # IPv6 loopback
+    ipaddress.ip_network("fe80::/10"),      # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),       # IPv6 unique-local
+    ipaddress.ip_network("::/128"),         # IPv6 unspecified
 ]
 
 def _is_safe_url(url: str) -> bool:
     """Validate that a webhook URL does not point to a private/internal address (SSRF prevention)."""
     try:
         parsed = urllib.parse.urlparse(url)
+        # Scheme validation
+        if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+            return False
         hostname = parsed.hostname
         if not hostname:
             return False
-        if hostname.lower() in ("localhost", "0.0.0.0"):
+        # Block known dangerous hostnames
+        if hostname.lower() in ("localhost", "0.0.0.0", "::1", "::ffff:127.0.0.1", "::ffff:169.254.169.254"):
             return False
         resolved_ips = socket.getaddrinfo(hostname, None)
         for _family, _type, _proto, _canonname, sockaddr in resolved_ips:
             ip = ipaddress.ip_address(sockaddr[0])
+            # First-line defense: stdlib property checks
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_unspecified:
+                return False
+            # IPv4-mapped IPv6 normalization
+            if hasattr(ip, 'ipv4_mapped') and ip.ipv4_mapped is not None:
+                mapped = ip.ipv4_mapped
+                if mapped.is_private or mapped.is_loopback or mapped.is_link_local or mapped.is_reserved or mapped.is_unspecified:
+                    return False
+                for net in _BLOCKED_NETWORKS:
+                    if mapped in net:
+                        return False
+            # Explicit blocklist check
             for net in _BLOCKED_NETWORKS:
                 if ip in net:
                     return False
