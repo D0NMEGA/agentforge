@@ -13,6 +13,7 @@ import hashlib
 import pyotp
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
+from fastapi import HTTPException
 
 # Use an isolated test database, disable CAPTCHA and rate limiting for tests
 os.environ["MOLTGRID_DB"] = "test_moltgrid.db"
@@ -6260,3 +6261,130 @@ class TestRetryAfter:
         import json as _json
         body = _json.loads(resp.body)
         assert body.get("retry_after_seconds") == 60
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECURITY REGRESSION TESTS (Phase 63 -- SEC2-01 through SEC2-04)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSecurityFixes:
+    """Regression tests for Round 2 power test security findings."""
+
+    # --- SEC2-01: SSRF IPv6 bypass in _is_safe_url ---
+
+    def test_ssrf_ipv6_loopback(self):
+        """_is_safe_url must block IPv6 loopback ::1."""
+        from helpers import _is_safe_url
+        assert _is_safe_url("http://[::1]:8000/admin") is False
+
+    def test_ssrf_ipv4_mapped_ipv6(self):
+        """_is_safe_url must block IPv4-mapped IPv6 (::ffff:127.0.0.1)."""
+        from helpers import _is_safe_url
+        assert _is_safe_url("http://[::ffff:127.0.0.1]:8000/admin") is False
+
+    def test_ssrf_link_local_ipv6(self):
+        """_is_safe_url must block IPv4-mapped link-local (::ffff:169.254.169.254)."""
+        from helpers import _is_safe_url
+        assert _is_safe_url("http://[::ffff:169.254.169.254]/meta") is False
+
+    def test_ssrf_ftp_scheme(self):
+        """_is_safe_url must reject non-HTTP schemes like ftp://."""
+        from helpers import _is_safe_url
+        assert _is_safe_url("ftp://internal.host/file") is False
+
+    def test_ssrf_valid_https(self):
+        """_is_safe_url must allow valid HTTPS URLs (sanity check)."""
+        from helpers import _is_safe_url
+        assert _is_safe_url("https://httpbin.org/post") is True
+
+    # --- SEC2-02: Shared memory namespace injection ---
+
+    def test_namespace_injection_agent_prefix(self):
+        """POST /v1/shared-memory with namespace='agent:other_id' must return 403."""
+        _, _, h = register_agent("ns-inject-agent")
+        r = client.post("/v1/shared-memory", json={
+            "namespace": "agent:other_id",
+            "key": "exploit",
+            "value": "pwned",
+        }, headers=h)
+        assert r.status_code == 403
+
+    def test_namespace_injection_system_prefix(self):
+        """POST /v1/shared-memory with namespace='system:admin' must return 403."""
+        _, _, h = register_agent("ns-inject-system")
+        r = client.post("/v1/shared-memory", json={
+            "namespace": "system:admin",
+            "key": "exploit",
+            "value": "pwned",
+        }, headers=h)
+        assert r.status_code == 403
+
+    def test_namespace_valid(self):
+        """POST /v1/shared-memory with valid namespace must return 200."""
+        _, _, h = register_agent("ns-valid")
+        r = client.post("/v1/shared-memory", json={
+            "namespace": "obstacle_course",
+            "key": "test_key",
+            "value": "test_value",
+        }, headers=h)
+        assert r.status_code == 200
+
+    def test_namespace_special_chars(self):
+        """POST /v1/shared-memory with special chars in namespace must return 422."""
+        _, _, h = register_agent("ns-special")
+        r = client.post("/v1/shared-memory", json={
+            "namespace": "bad namespace!",
+            "key": "exploit",
+            "value": "pwned",
+        }, headers=h)
+        assert r.status_code == 422
+
+    # --- SEC2-03: Registration credits ---
+
+    @patch("routers.auth._queue_email")
+    def test_register_credits_50(self, mock_email):
+        """Newly registered agents must receive 50 credits (not 200)."""
+        name = f"credits-check-{uuid.uuid4().hex[:6]}"
+        r = client.post("/v1/register", json={"name": name})
+        assert r.status_code == 200
+        agent_id = r.json()["agent_id"]
+        from db import get_db
+        with get_db() as db:
+            row = db.execute("SELECT credits FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        assert row is not None
+        assert row["credits"] == 50, f"Expected 50 credits, got {row['credits']}"
+
+    # --- SEC2-04: Admin login hardening ---
+
+    def test_admin_login_generic_error(self):
+        """Admin login with wrong password must say 'Invalid credentials' not 'Invalid password'."""
+        r = client.post("/admin/api/login", json={"password": "wrong-password-123"})
+        assert r.status_code == 401
+        body = r.json()
+        detail = body.get("detail", "")
+        assert "Invalid credentials" in detail, f"Expected 'Invalid credentials', got: {detail}"
+        assert "Invalid password" not in detail, "Error message leaks that password is the wrong field"
+
+    def test_admin_lockout_after_5_failures(self):
+        """After 5 failed admin logins from same IP, 6th attempt must return 429."""
+        from routers.admin import _admin_lockout, _check_admin_lockout, _record_admin_failure
+        # Clear any previous state
+        _admin_lockout.clear()
+
+        # Simulate a test IP
+        from unittest.mock import MagicMock
+        fake_request = MagicMock()
+        fake_request.headers = {"x-forwarded-for": "10.99.99.99"}
+        fake_request.client.host = "10.99.99.99"
+
+        # Record 5 failures
+        for i in range(5):
+            _record_admin_failure(fake_request)
+
+        # 6th attempt should be blocked
+        with pytest.raises(HTTPException) as exc_info:
+            _check_admin_lockout(fake_request)
+        assert exc_info.value.status_code == 429
+
+        # Clean up
+        _admin_lockout.clear()
