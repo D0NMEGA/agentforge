@@ -109,7 +109,11 @@ def admin_login(req: AdminLoginRequest, request: Request, response: Response):
         raise HTTPException(503, "Admin not configured. Set ADMIN_PASSWORD_HASH env var.")
     # Support bcrypt hashes (start with $2) with SHA-256 fallback for backward compat
     if ADMIN_PASSWORD_HASH.startswith("$2"):
-        if not _bcrypt.checkpw(req.password.encode(), ADMIN_PASSWORD_HASH.encode()):
+        try:
+            valid = _bcrypt.checkpw(req.password.encode(), ADMIN_PASSWORD_HASH.encode())
+        except (ValueError, TypeError):
+            valid = False
+        if not valid:
             _record_admin_failure(request)
             raise HTTPException(401, "Invalid credentials")
     else:
