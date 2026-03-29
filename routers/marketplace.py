@@ -111,7 +111,7 @@ def marketplace_browse(request: Request,
     status: str = Query("open"),
     tag: Optional[str] = None,
     min_reward: int = Query(0, ge=0),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
 ):
     """Browse marketplace tasks. No auth required."""
     conditions = ["status=?"]
@@ -372,7 +372,7 @@ def scenario_create(request: Request, req: ScenarioCreateRequest, agent_id: str 
 def scenario_list(request: Request, 
     pattern: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = Query(20, le=100),
+    limit: int = Query(20, ge=1, le=100),
     agent_id: str = Depends(get_agent_id),
 ):
     """List your test scenarios."""
