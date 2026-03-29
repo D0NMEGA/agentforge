@@ -84,7 +84,7 @@ def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, nam
 @router.patch("/v1/memory/{key}/visibility", tags=["Memory"], response_model=MemoryVisibilityResponse)
 @limiter.limit("60/minute")
 def memory_set_visibility(request: Request, key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
-    vis = req.visibility if req.visibility in ("private", "public", "shared") else "private"
+    vis = req.visibility  # Validated by Pydantic Literal["private","public","shared"]
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
     # SEC-05: Always scope to caller's auth-derived namespace (req.namespace no longer exists after SEC-01 fix)
     resolved_ns = _resolve_namespace("", agent_id)

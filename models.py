@@ -73,7 +73,7 @@ class NotificationPreferencesRequest(BaseModel):
 class MemoryVisibilityRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
     key: Optional[str] = Field(None, max_length=256)
-    visibility: str = Field(..., description="private | public | shared")
+    visibility: Literal["private", "public", "shared"] = Field(..., description="private | public | shared")
     shared_agents: List[str] = Field(default_factory=list)
 
 class MemoryBulkVisibilityRequest(BaseModel):
@@ -375,6 +375,13 @@ class ScheduledTaskRequest(BaseModel):
     payload: str = Field(..., min_length=1, max_length=MAX_QUEUE_PAYLOAD_SIZE)
     priority: int = Field(0, ge=0, le=10)
 
+class ScheduleUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    enabled: Optional[bool] = Field(None, description="Enable or disable the schedule")
+    cron_expr: Optional[str] = Field(None, max_length=128, description="Updated cron expression")
+    queue_name: Optional[str] = Field(None, max_length=64)
+    priority: Optional[int] = Field(None, ge=0, le=10)
+
 class ScheduledTaskResponse(BaseModel):
     task_id: str
     cron_expr: str
@@ -392,16 +399,17 @@ class ScheduledTaskResponse(BaseModel):
 
 class VectorUpsertRequest(BaseModel):
     key: str = Field(..., min_length=1, max_length=256)
-    text: str = Field(..., max_length=10000, description="Text to embed")
+    text: str = Field(..., min_length=1, max_length=10000, description="Text to embed")
     namespace: str = Field("default", max_length=64)
     metadata: Optional[dict] = Field(None, description="Optional metadata (stored as JSON)")
     importance: float = Field(0.5, ge=0.0, le=1.0, description="Importance weight (0.0-1.0) for composite scoring")
 
 class VectorSearchRequest(BaseModel):
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
     query: str = Field(..., max_length=10000, description="Search query to embed")
     namespace: str = Field("default", max_length=64)
-    limit: int = Field(5, ge=1, le=100, description="Number of results to return")
-    min_similarity: float = Field(0.0, ge=0.0, le=1.0, description="Minimum cosine similarity threshold")
+    limit: int = Field(5, ge=1, le=100, validation_alias=AliasChoices("limit", "top_k"), description="Number of results to return")
+    min_similarity: float = Field(0.0, ge=0.0, le=1.0, validation_alias=AliasChoices("min_similarity", "min_score"), description="Minimum cosine similarity threshold")
     scoring: str = Field("cosine", description="Scoring mode: 'cosine' (similarity only) or 'composite' (0.4*recency + 0.2*importance + 0.4*cosine)")
 
 

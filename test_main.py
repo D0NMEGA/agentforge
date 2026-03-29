@@ -801,12 +801,12 @@ class TestSchedules:
         }, headers=h)
         task_id = r.json()["task_id"]
 
-        # Disable
-        d = client.patch(f"/v1/schedules/{task_id}", params={"enabled": False}, headers=h)
+        # Disable (MED2-06: JSON body instead of query param)
+        d = client.patch(f"/v1/schedules/{task_id}", json={"enabled": False}, headers=h)
         assert d.json()["enabled"] is False
 
         # Enable
-        e = client.patch(f"/v1/schedules/{task_id}", params={"enabled": True}, headers=h)
+        e = client.patch(f"/v1/schedules/{task_id}", json={"enabled": True}, headers=h)
         assert e.json()["enabled"] is True
 
     def test_delete(self):
@@ -854,7 +854,7 @@ class TestSchedules:
 
     def test_toggle_not_found(self):
         _, _, h = register_agent()
-        r = client.patch("/v1/schedules/sched_fake", params={"enabled": False}, headers=h)
+        r = client.patch("/v1/schedules/sched_fake", json={"enabled": False}, headers=h)
         assert r.status_code == 404
 
 
@@ -3102,8 +3102,8 @@ class TestMemoryVisibilityEndpoint:
         )
         assert r.status_code == 404, f"Expected 404, got {r.status_code}: {r.text}"
 
-    def test_invalid_visibility_coerces_to_private(self):
-        """PATCH /v1/memory/{key}/visibility with unknown visibility coerces to 'private'."""
+    def test_invalid_visibility_returns_422(self):
+        """MED2-04: PATCH /v1/memory/{key}/visibility with unknown visibility returns 422."""
         _, _, h = register_agent("vis-coerce")
         client.post("/v1/memory", json={"key": "coercekey", "value": "v", "visibility": "public"}, headers=h)
         r = client.patch(
@@ -3111,8 +3111,7 @@ class TestMemoryVisibilityEndpoint:
             json={"namespace": "default", "key": "coercekey", "visibility": "unknown_val", "shared_agents": []},
             headers=h,
         )
-        assert r.status_code == 200
-        assert r.json()["visibility"] == "private", "Invalid visibility should coerce to 'private'"
+        assert r.status_code == 422, "Invalid visibility should return 422 not silently coerce"
 
     def test_patch_visibility_changes_cross_agent_access(self):
         """Setting public -> cross-agent read returns 200; setting private -> 404 (SEC-02)."""

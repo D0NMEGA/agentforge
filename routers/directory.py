@@ -94,10 +94,11 @@ def directory_me(request: Request, agent_id: str = Depends(get_agent_id)):
 async def directory_list(request: Request,
     capability: Optional[str] = None,
     q: Optional[str] = None,
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
     """Browse the public agent directory. No auth required. Cached for 30 seconds."""
-    cache_key = f"directory_list:{q or ''}:{capability or ''}:{limit}"
+    cache_key = f"directory_list:{q or ''}:{capability or ''}:{limit}:{offset}"
     cached = await response_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -108,20 +109,20 @@ async def directory_list(request: Request,
             f"SELECT {cols} FROM agents "
             "WHERE public=1 AND (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?) "
             "OR LOWER(capabilities) LIKE LOWER(?) OR LOWER(skills) LIKE LOWER(?)) "
-            "ORDER BY created_at DESC LIMIT ?",
-            (search_term, search_term, search_term, search_term, limit)
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (search_term, search_term, search_term, search_term, limit, offset)
         )
     elif capability:
         rows = await async_db_fetchall(
             f"SELECT {cols} FROM agents "
-            "WHERE public=1 AND capabilities LIKE ? ORDER BY created_at DESC LIMIT ?",
-            (f"%{capability}%", limit)
+            "WHERE public=1 AND capabilities LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (f"%{capability}%", limit, offset)
         )
     else:
         rows = await async_db_fetchall(
             f"SELECT {cols} FROM agents "
-            "WHERE public=1 ORDER BY created_at DESC LIMIT ?",
-            (limit,)
+            "WHERE public=1 ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset)
         )
     agents = []
     for d in rows:

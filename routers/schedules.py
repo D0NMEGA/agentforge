@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from config import MAX_QUEUE_PAYLOAD_SIZE
 from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt
-from models import ScheduledTaskRequest, ScheduledTaskResponse, ScheduleListResponse
+from models import ScheduledTaskRequest, ScheduleUpdateRequest, ScheduledTaskResponse, ScheduleListResponse
 
 from rate_limit import limiter
 
@@ -73,28 +73,57 @@ def schedule_get(request: Request, task_id: str, agent_id: str = Depends(get_age
 
 @router.patch("/v1/schedules/{task_id}", tags=["Schedules"])
 @limiter.limit("60/minute")
-def schedule_toggle(request: Request, task_id: str, enabled: bool = True, agent_id: str = Depends(get_agent_id)):
-    """Enable or disable a scheduled task."""
+def schedule_update(request: Request, task_id: str, req: ScheduleUpdateRequest, agent_id: str = Depends(get_agent_id)):
+    """Update a scheduled task. Supports enabling/disabling and updating fields."""
     with get_db() as db:
-        # If re-enabling, recalculate next_run
-        if enabled:
-            row = db.execute("SELECT cron_expr FROM scheduled_tasks WHERE task_id=? AND agent_id=?", (task_id, agent_id)).fetchone()
-            if not row:
-                raise HTTPException(404, "Scheduled task not found")
-            cron = croniter(row["cron_expr"], datetime.now(timezone.utc))
-            next_run = cron.get_next(datetime).isoformat()
-            db.execute(
-                "UPDATE scheduled_tasks SET enabled=1, next_run_at=? WHERE task_id=? AND agent_id=?",
-                (next_run, task_id, agent_id)
-            )
-        else:
-            r = db.execute(
-                "UPDATE scheduled_tasks SET enabled=0 WHERE task_id=? AND agent_id=?",
-                (task_id, agent_id)
-            )
-            if r.rowcount == 0:
-                raise HTTPException(404, "Scheduled task not found")
-    return {"task_id": task_id, "enabled": enabled}
+        row = db.execute(
+            "SELECT cron_expr, enabled FROM scheduled_tasks WHERE task_id=? AND agent_id=?",
+            (task_id, agent_id)
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Scheduled task not found")
+
+        updates = []
+        params = []
+
+        if req.cron_expr is not None:
+            try:
+                croniter(req.cron_expr, datetime.now(timezone.utc))
+            except (ValueError, KeyError) as e:
+                raise HTTPException(400, f"Invalid cron expression: {e}")
+            updates.append("cron_expr=?")
+            params.append(req.cron_expr)
+
+        if req.queue_name is not None:
+            updates.append("queue_name=?")
+            params.append(req.queue_name)
+
+        if req.priority is not None:
+            updates.append("priority=?")
+            params.append(req.priority)
+
+        if req.enabled is not None:
+            updates.append("enabled=?")
+            params.append(int(req.enabled))
+            # If re-enabling, recalculate next_run
+            if req.enabled:
+                cron_expr = req.cron_expr if req.cron_expr is not None else row["cron_expr"]
+                cron = croniter(cron_expr, datetime.now(timezone.utc))
+                next_run = cron.get_next(datetime).isoformat()
+                updates.append("next_run_at=?")
+                params.append(next_run)
+
+        if not updates:
+            raise HTTPException(400, "No fields to update")
+
+        params.extend([task_id, agent_id])
+        db.execute(
+            f"UPDATE scheduled_tasks SET {', '.join(updates)} WHERE task_id=? AND agent_id=?",
+            params
+        )
+
+    enabled_val = req.enabled if req.enabled is not None else bool(row["enabled"])
+    return {"task_id": task_id, "enabled": enabled_val}
 
 @router.delete("/v1/schedules/{task_id}", tags=["Schedules"])
 @limiter.limit("60/minute")
