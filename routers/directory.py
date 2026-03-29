@@ -398,9 +398,27 @@ def log_collaboration(request: Request, req: CollaborationRequest, agent_id: str
         "partner_new_reputation": new_rep, "created_at": now,
     }
 
+@router.get("/v1/directory/collaborations", tags=["Directory"])
+@limiter.limit("30/minute")
+def get_collaborations(request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    agent_id: str = Depends(get_agent_id),
+):
+    """MED2-12: List collaborations for the authenticated agent (as initiator or partner)."""
+    with get_db() as db:
+        rows = db.execute(
+            "SELECT collaboration_id, agent_id, partner_agent, task_type, outcome, rating, created_at "
+            "FROM collaborations WHERE agent_id=? OR partner_agent=? "
+            "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (agent_id, agent_id, limit, offset),
+        ).fetchall()
+    return {"collaborations": [dict(r) for r in rows]}
+
+
 @router.get("/v1/directory/match", response_model=DirectoryMatchResponse, tags=["Directory"])
 @limiter.limit("30/minute")
-def directory_match(request: Request, 
+def directory_match(request: Request,
     need: str = Query(..., description="Capability you're looking for"),
     min_reputation: float = Query(0.0, ge=0.0),
     limit: int = Query(10, le=50),

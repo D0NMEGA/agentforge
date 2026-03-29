@@ -186,35 +186,66 @@ async def sla(request: Request):
 @router.get("/v1/health", tags=["System"])
 @limiter.limit("30/minute")
 async def health(request: Request):
-    """Public health check -- no auth required. Cached for 10 seconds.
+    """Health check -- minimal for unauthenticated, full details with valid X-API-Key.
 
+    MED2-10: Tiered response -- unauth gets {status, version, timestamp} only.
     OPS-04: Returns 503 with retry_after_seconds=30 when DB is unreachable.
     """
-    cached = await response_cache.get("health")
-    if cached is not None:
-        return cached
+    from helpers import hash_key
+
+    # MED2-10: Check for optional authentication
+    x_api_key = None
+    for h_name, h_val in request.headers.items():
+        if h_name.lower() == "x-api-key":
+            x_api_key = h_val
+            break
+
+    is_authenticated = False
+    if x_api_key:
+        try:
+            agent = await async_db_fetchone(
+                "SELECT agent_id FROM agents WHERE api_key_hash=?", (hash_key(x_api_key),)
+            )
+            is_authenticated = agent is not None
+        except Exception:
+            pass
 
     # OPS-04: DB liveness check -- if DB is down, return 503 immediately
     try:
         await async_db_fetchone("SELECT 1 as ping")
     except Exception as db_err:
         logger.error(f"Health check: DB unreachable: {db_err}")
+        minimal_503 = {
+            "status": "unavailable",
+            "version": "0.9.0",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "retry_after_seconds": 30,
+        }
+        if is_authenticated:
+            minimal_503["components"] = {
+                "database": {"status": "down", "detail": "Database unreachable"},
+                "relay": {"status": "unknown"},
+                "websocket": {"status": "unknown"},
+                "sse": {"status": "unknown"},
+            }
         return JSONResponse(
             status_code=503,
-            content={
-                "status": "unavailable",
-                "version": "0.9.0",
-                "components": {
-                    "database": {"status": "down", "detail": "Database unreachable"},
-                    "relay": {"status": "unknown"},
-                    "websocket": {"status": "unknown"},
-                    "sse": {"status": "unknown"},
-                },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "retry_after_seconds": 30,
-            },
+            content=minimal_503,
             headers={"Retry-After": "30"},
         )
+
+    # MED2-10: Minimal response for unauthenticated requests
+    if not is_authenticated:
+        return {
+            "status": "operational",
+            "version": "0.9.0",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # Full response for authenticated requests (cached per auth tier)
+    cached = await response_cache.get("health_full")
+    if cached is not None:
+        return cached
 
     agent_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM agents"))["c"]
     job_count = (await async_db_fetchone("SELECT COUNT(*) as c FROM queue"))["c"]
@@ -269,7 +300,7 @@ async def health(request: Request):
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    await response_cache.set("health", result, 10)
+    await response_cache.set("health_full", result, 10)
     return result
 
 

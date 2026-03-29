@@ -557,11 +557,11 @@ def _memory_ttl_cleanup_loop():
 
 
 def _relay_cleanup_loop():
-    """MED2-07: Dead-letter relay messages stuck in 'accepted' for >30 days. Runs every hour."""
+    """MED2-07: Dead-letter relay messages stuck in 'accepted' for >30 minutes. Runs every 5 minutes."""
     while True:
-        time.sleep(3600)
+        time.sleep(300)
         try:
-            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
             with get_db() as db:
                 stuck = db.execute(
                     "SELECT message_id, from_agent, to_agent FROM relay "
@@ -582,7 +582,7 @@ def _relay_cleanup_loop():
                     )
                     db.execute("DELETE FROM relay WHERE message_id=?", (r["message_id"],))
                 if stuck:
-                    logger.info(f"[relay_cleanup] Dead-lettered {len(stuck)} messages stuck >30 days")
+                    logger.info(f"[relay_cleanup] Dead-lettered {len(stuck)} messages stuck >30 minutes")
         except Exception:
             pass  # Best-effort background task
 

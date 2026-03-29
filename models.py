@@ -122,7 +122,7 @@ class IntegrationStatusResponse(BaseModel):
 
 class WebhookRegisterRequest(BaseModel):
     url: str = Field(..., max_length=2048, description="HTTPS callback URL")
-    event_types: List[str] = Field(..., description="Events to subscribe to: message.received, job.completed")
+    event_types: List[str] = Field(..., min_length=1, description="Events to subscribe to: message.received, job.completed")
     secret: Optional[str] = Field(None, max_length=128, description="Shared secret for HMAC signature verification")
 
 class WebhookResponse(BaseModel):
@@ -335,7 +335,8 @@ class QueueJobResponse(BaseModel):
     result: Optional[str]
 
 class QueueFailRequest(BaseModel):
-    reason: str = Field("", max_length=1000, description="Why the job failed")
+    model_config = ConfigDict(populate_by_name=True)
+    reason: str = Field("", max_length=1000, validation_alias=AliasChoices("reason", "fail_reason", "error"), description="Why the job failed")
 
 class QueueCompleteRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')

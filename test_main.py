@@ -1271,7 +1271,9 @@ class TestWebSocket:
 
 class TestHealthAndStats:
     def test_health(self):
-        r = client.get("/v1/health")
+        """MED2-10: Health with auth returns full stats."""
+        _, _, h = register_agent("health-full-bot")
+        r = client.get("/v1/health", headers=h)
         assert r.status_code == 200
         d = r.json()
         assert d["status"] == "operational"
@@ -5183,8 +5185,9 @@ class TestHealthComponents:
         self.client = TestClient(app)
 
     def test_health_has_components(self):
-        """GET /v1/health includes components dict with all 4 subsystems."""
-        r = self.client.get("/v1/health")
+        """GET /v1/health with auth includes components dict with all 4 subsystems."""
+        _, _, h = register_agent("health-comp-bot")
+        r = self.client.get("/v1/health", headers=h)
         assert r.status_code == 200
         d = r.json()
         assert "components" in d, "health response missing 'components' key"
@@ -6191,10 +6194,9 @@ class TestHealthDb503:
         assert r.status_code == 503
         d = r.json()
         assert d.get("retry_after_seconds") is not None or "retry_after" in str(d)
-        # Components should show database=down
-        components = d.get("components") or {}
-        db_status = components.get("database", {})
-        assert db_status.get("status") in ("error", "down", "unavailable")
+        # MED2-10: Without auth (DB down prevents auth check), minimal 503 response
+        assert d["status"] == "unavailable"
+        assert "version" in d
 
 
 class TestRetryAfter:
@@ -6590,3 +6592,183 @@ class TestMED2ScheduleEnabled:
 
         r = client.get(f"/v1/schedules/{task_id}", headers=h)
         assert r.json()["enabled"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 66: MEDIUM FIXES -- RELAY, SESSIONS, HEALTH (MED2-07 through MED2-12)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMED207RelayCleanup:
+    """MED2-07: Relay cleanup loop should use 30-minute threshold, not 30 days."""
+
+    def test_relay_cleanup_loop_uses_30_minute_threshold(self):
+        """The _relay_cleanup_loop function should dead-letter messages stuck >30 minutes."""
+        from helpers import _relay_cleanup_loop
+        import inspect
+        source = inspect.getsource(_relay_cleanup_loop)
+        # Must reference minutes=30, not days=30
+        assert "minutes=30" in source or "minutes = 30" in source, \
+            "Expected 30-minute threshold in _relay_cleanup_loop"
+        assert "days=30" not in source and "days = 30" not in source, \
+            "Should NOT use 30-day threshold"
+
+    def test_relay_cleanup_loop_runs_every_5_minutes(self):
+        """The cleanup loop should sleep for 300 seconds (5 minutes), not 3600."""
+        from helpers import _relay_cleanup_loop
+        import inspect
+        source = inspect.getsource(_relay_cleanup_loop)
+        assert "sleep(300)" in source or "sleep( 300 )" in source, \
+            "Expected 5-minute (300s) sleep interval"
+        assert "sleep(3600)" not in source, \
+            "Should NOT use 1-hour sleep interval"
+
+
+class TestMED208WebhookEventTypes:
+    """MED2-08: Webhook register requires non-empty event_types."""
+
+    def test_webhook_empty_event_types_returns_422(self):
+        """POST /v1/webhooks with empty event_types list should return 422."""
+        _, _, h = register_agent("med2-08-bot")
+        r = client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": [],
+        }, headers=h)
+        assert r.status_code == 422, f"Expected 422 for empty event_types, got {r.status_code}"
+
+    def test_webhook_nonempty_event_types_accepted(self):
+        """POST /v1/webhooks with valid event_types should succeed."""
+        _, _, h = register_agent("med2-08-ok-bot")
+        r = client.post("/v1/webhooks", json={
+            "url": "https://example.com/hook",
+            "event_types": ["message.received"],
+        }, headers=h)
+        assert r.status_code == 200
+
+
+class TestMED209SessionTitle:
+    """MED2-09: Session create should persist title from request body."""
+
+    def test_session_title_persists(self):
+        """POST /v1/sessions with title='My Session' should return and persist that title."""
+        _, _, h = register_agent("med2-09-bot")
+        r = client.post("/v1/sessions", json={
+            "title": "My Session",
+        }, headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["title"] == "My Session", f"Expected 'My Session', got {data['title']}"
+
+        # Verify it persists in GET
+        session_id = data["session_id"]
+        r2 = client.get(f"/v1/sessions/{session_id}", headers=h)
+        assert r2.status_code == 200
+        assert r2.json()["title"] == "My Session"
+
+    def test_session_default_title_when_none(self):
+        """POST /v1/sessions without title should use default format."""
+        _, _, h = register_agent("med2-09-default-bot")
+        r = client.post("/v1/sessions", json={}, headers=h)
+        assert r.status_code == 200
+        assert r.json()["title"].startswith("Session ")
+
+
+class TestMED210HealthTiering:
+    """MED2-10: Health endpoint should return minimal info for unauth, full for authed."""
+
+    def test_health_unauth_minimal(self):
+        """GET /v1/health without auth returns only status, version, timestamp."""
+        r = client.get("/v1/health")
+        assert r.status_code == 200
+        data = r.json()
+        assert "status" in data
+        assert "version" in data
+        assert "timestamp" in data
+        # Should NOT have detailed stats or components
+        assert "stats" not in data, "Unauthenticated health should not include stats"
+        assert "components" not in data, "Unauthenticated health should not include components"
+
+    def test_health_authed_full(self):
+        """GET /v1/health with valid API key returns full details including stats and components."""
+        _, _, h = register_agent("med2-10-bot")
+        r = client.get("/v1/health", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert "status" in data
+        assert "version" in data
+        assert "stats" in data, "Authenticated health should include stats"
+        assert "components" in data, "Authenticated health should include components"
+
+
+class TestMED211QueueFailReason:
+    """MED2-11: Queue fail should accept reason/fail_reason/error via AliasChoices."""
+
+    def _setup_processing_job(self):
+        """Create a job in processing state and return (job_id, headers)."""
+        _, _, h = register_agent("med2-11-bot")
+        r = client.post("/v1/queue/submit", json={
+            "payload": "test-job",
+            "max_attempts": 1,
+        }, headers=h)
+        job_id = r.json()["job_id"]
+        client.post(f"/v1/queue/claim", headers=h)
+        return job_id, h
+
+    def test_fail_with_reason_field(self):
+        """Queue fail with 'reason' field should work (existing behavior)."""
+        job_id, h = self._setup_processing_job()
+        r = client.post(f"/v1/queue/{job_id}/fail", json={"reason": "timeout"}, headers=h)
+        assert r.status_code == 200
+
+    def test_fail_with_fail_reason_field(self):
+        """Queue fail with 'fail_reason' field should work via AliasChoices."""
+        job_id, h = self._setup_processing_job()
+        r = client.post(f"/v1/queue/{job_id}/fail", json={"fail_reason": "timeout"}, headers=h)
+        assert r.status_code == 200
+
+    def test_fail_with_error_field(self):
+        """Queue fail with 'error' field should work via AliasChoices."""
+        job_id, h = self._setup_processing_job()
+        r = client.post(f"/v1/queue/{job_id}/fail", json={"error": "timeout"}, headers=h)
+        assert r.status_code == 200
+
+
+class TestMED212CollaborationsEndpoint:
+    """MED2-12: GET /v1/directory/collaborations should work for authenticated agents."""
+
+    def test_get_collaborations_returns_200(self):
+        """GET /v1/directory/collaborations returns 200 for authenticated agent."""
+        _, _, h = register_agent("med2-12-bot")
+        r = client.get("/v1/directory/collaborations", headers=h)
+        assert r.status_code == 200
+        data = r.json()
+        assert "collaborations" in data
+
+    def test_get_collaborations_unauth_returns_401(self):
+        """GET /v1/directory/collaborations without auth returns 401."""
+        r = client.get("/v1/directory/collaborations")
+        assert r.status_code == 401
+
+    def test_get_collaborations_shows_logged_collab(self):
+        """After logging a collaboration, GET should return it."""
+        aid1, _, h1 = register_agent("med2-12-collab1")
+        aid2, _, h2 = register_agent("med2-12-collab2")
+
+        # Make agent2 public so it can be found as partner
+        client.put("/v1/directory", json={
+            "name": "collab2", "description": "test", "capabilities": "test", "public": True
+        }, headers=h2)
+
+        # Log a collaboration
+        r = client.post("/v1/directory/collaborations", json={
+            "partner_agent": aid2,
+            "outcome": "success",
+            "rating": 5,
+        }, headers=h1)
+        assert r.status_code == 200
+
+        # GET should show it
+        r = client.get("/v1/directory/collaborations", headers=h1)
+        assert r.status_code == 200
+        collabs = r.json()["collaborations"]
+        assert len(collabs) >= 1
+        assert any(c["partner_agent"] == aid2 for c in collabs)
