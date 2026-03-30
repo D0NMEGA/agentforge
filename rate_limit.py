@@ -9,10 +9,14 @@ state sharing. Falls back to in-memory storage otherwise.
 """
 
 import os
+import re
 import logging
+import hashlib
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+
+from config import TIER_ENDPOINT_LIMITS, TIER_MULTIPLIERS, FIXED_CATEGORIES, TIER_AUTH_SIGNUP_LIMITS
 
 logger = logging.getLogger("moltgrid.rate_limit")
 
@@ -30,31 +34,92 @@ else:
 
 
 def _get_key_func(request):
-    """Smart key function that differentiates by auth type.
+    """Smart key function: returns 'tier:identifier' for tier-aware limiting.
 
-    - Agent API key endpoints: key by API key hash
-    - JWT user endpoints: key by Authorization header hash
-    - Unauthenticated: key by IP address
+    - Agent API key endpoints: key by tier + API key hash
+    - JWT user endpoints: key by tier + Authorization header hash
+    - Unauthenticated: key by tier (free) + IP address
     """
+    tier = "free"
+
     # Try X-API-Key first (agent endpoints)
     api_key = request.headers.get("x-api-key")
     if api_key:
-        import hashlib
-        return hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        ident = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        # Look up tier from DB
+        try:
+            from db import get_db
+            with get_db() as db:
+                row = db.execute(
+                    "SELECT u.subscription_tier FROM users u "
+                    "JOIN agents a ON a.owner_id = u.user_id "
+                    "WHERE a.api_key_hash = ?",
+                    (hashlib.sha256(api_key.strip().encode()).hexdigest(),)
+                ).fetchone()
+                if row:
+                    tier = row["subscription_tier"] or "free"
+        except Exception:
+            pass
+        request.state.subscription_tier = tier
+        return f"{tier}:{ident}"
 
     # Try JWT Authorization header (dashboard/user endpoints)
     auth_header = request.headers.get("authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        import hashlib
-        return hashlib.sha256(auth_header.encode()).hexdigest()[:16]
+        ident = hashlib.sha256(auth_header.encode()).hexdigest()[:16]
+        # JWT endpoints are dashboard -- set tier from token if available
+        try:
+            import jwt as pyjwt
+            from config import JWT_SECRET, JWT_ALGORITHM
+            token = auth_header[len("Bearer "):]
+            payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            tier = payload.get("subscription_tier", "free") or "free"
+        except Exception:
+            pass
+        request.state.subscription_tier = tier
+        return f"{tier}:{ident}"
 
-    # Fallback: IP address
-    return get_remote_address(request)
+    # Fallback: IP address (unauthenticated = free tier)
+    request.state.subscription_tier = tier
+    return f"{tier}:{get_remote_address(request)}"
+
+
+def make_tier_limit(endpoint_category: str):
+    """Factory: returns a dynamic limit function for the given endpoint category.
+
+    Usage: @limiter.limit(make_tier_limit("agent_read"))
+
+    Special handling for auth_signup: uses TIER_AUTH_SIGNUP_LIMITS (explicit per-tier
+    values from RATE-01) instead of TIER_MULTIPLIERS.
+    """
+    if endpoint_category == "auth_signup":
+        # auth_signup has explicit per-tier limits that don't follow multiplier pattern
+        def _auth_signup_limit(key: str) -> str:
+            tier = key.split(":")[0] if ":" in key else "free"
+            return TIER_AUTH_SIGNUP_LIMITS.get(tier, TIER_AUTH_SIGNUP_LIMITS["free"])
+        return _auth_signup_limit
+
+    base_limit_str = TIER_ENDPOINT_LIMITS[endpoint_category]
+    match = re.match(r"^(\d+)/(\w+)$", base_limit_str)
+    if not match:
+        raise ValueError(f"Invalid base limit format: {base_limit_str}")
+    base_num = int(match.group(1))
+    window = match.group(2)
+
+    def _dynamic_limit(key: str) -> str:
+        # key format is "tier:identifier" from _get_key_func
+        tier = key.split(":")[0] if ":" in key else "free"
+        if endpoint_category in FIXED_CATEGORIES:
+            return base_limit_str
+        multiplier = TIER_MULTIPLIERS.get(tier, 1)
+        return f"{int(base_num * multiplier)}/{window}"
+
+    return _dynamic_limit
 
 
 limiter = Limiter(
     key_func=_get_key_func,
-    default_limits=["120/minute"],
+    default_limits=[],
     enabled=_rate_limit_enabled,
     storage_uri=_storage_uri,
 )

@@ -14,13 +14,36 @@ logger = logging.getLogger("moltgrid")
 # ─── Config ───────────────────────────────────────────────────────────────────
 MAX_MEMORY_VALUE_SIZE = 50_000  # 50KB per value
 MAX_QUEUE_PAYLOAD_SIZE = 100_000  # 100KB per job
-RATE_LIMIT_WINDOW = 60  # seconds
-RATE_LIMIT_MAX = 120  # requests per window per agent (fallback / free-tier default)
+RATE_LIMIT_WINDOW = 60  # seconds -- retained for X-RateLimit-Reset header calculation
+DEFAULT_RATE_LIMIT_MAX = 120  # unauthenticated/fallback value for X-RateLimit-Limit header
 TIER_RATE_LIMITS = {
     "free":  120,
     "hobby": 300,
     "team":  600,
     "scale": 1200,
+}
+
+# Per-endpoint base limits (free tier) -- scaled by TIER_MULTIPLIERS for paid tiers
+TIER_ENDPOINT_LIMITS = {
+    "auth_login": "20/minute",
+    "auth_signup": "3/hour",       # See TIER_AUTH_SIGNUP_LIMITS for per-tier overrides
+    "auth_forgot": "5/hour",
+    "auth_2fa_reset": "3/hour",
+    "agent_read": "120/minute",
+    "agent_write": "60/minute",
+    "admin": "60/minute",       # fixed, not tier-scaled
+    "billing": "30/minute",     # fixed, not tier-scaled
+}
+TIER_MULTIPLIERS = {"free": 1, "hobby": 2.5, "team": 5, "scale": 10}
+FIXED_CATEGORIES = {"admin", "billing"}  # Only admin and billing are fixed
+
+# auth_signup has explicit per-tier limits from RATE-01 that do NOT follow TIER_MULTIPLIERS
+# RATE-01: free=3/hr, hobby=10/hr, team=50/hr, scale=200/hr
+TIER_AUTH_SIGNUP_LIMITS = {
+    "free": "3/hour",
+    "hobby": "10/hour",
+    "team": "50/hour",
+    "scale": "200/hour",
 }
 
 # Subscription tier limits
