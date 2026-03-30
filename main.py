@@ -109,19 +109,41 @@ app = FastAPI(
 app.state.limiter = limiter
 
 async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    """Return JSON 429 with Retry-After header instead of plain text."""
-    retry_after = exc.detail.split("per")[0].strip() if exc.detail else "60"
-    # Extract seconds from the limit string (e.g., "Rate limit exceeded: 60 per 1 minute")
-    try:
-        retry_seconds = int(retry_after.split()[-1])
-    except (ValueError, IndexError):
-        retry_seconds = 60
-    response = JSONResponse(
-        status_code=429,
-        content={"error": "Rate limit exceeded", "detail": str(exc.detail), "retry_after": retry_seconds},
-    )
-    response.headers["Retry-After"] = str(retry_seconds)
-    return response
+    """Unified 429 handler -- fixed Retry-After, structured body (RATE-03)."""
+    import re as _re_rl
+    # Determine window type from the limit string in exc.detail
+    detail_str = str(exc.detail) if exc.detail else ""
+    is_hourly = "hour" in detail_str.lower()
+    retry_after_seconds = 3600 if is_hourly else 60
+
+    # Extract tier and category from request state (set by key_func and decorator)
+    tier = getattr(request.state, "subscription_tier", "free")
+    endpoint_category = getattr(request.state, "endpoint_category", "unknown")
+
+    # Extract limit number from detail if possible
+    limit_match = _re_rl.search(r"(\d+) per", detail_str)
+    limit_value = int(limit_match.group(1)) if limit_match else None
+
+    request_id = getattr(request.state, "request_id", None)
+
+    body = {
+        "error": "rate_limit_exceeded",
+        "message": f"Rate limit exceeded for {tier} tier",
+        "retry_after_seconds": retry_after_seconds,
+        "tier": tier,
+        "limit": limit_value,
+        "remaining": 0,
+        "reset": retry_after_seconds,
+        "endpoint_category": endpoint_category,
+        "request_id": request_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    headers = {"Retry-After": str(retry_after_seconds)}
+    if request_id:
+        headers["X-Request-ID"] = request_id
+
+    return JSONResponse(status_code=429, content=body, headers=headers)
 
 app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
@@ -463,17 +485,23 @@ async def add_response_headers(request: Request, call_next):
 
     response.headers["X-Request-ID"] = request_id
     response.headers["X-MoltGrid-Version"] = app.version
-    rate_limit_max = getattr(request.state, "rate_limit_max", RATE_LIMIT_MAX)
-    response.headers["X-RateLimit-Limit"] = str(rate_limit_max if rate_limit_max is not None else RATE_LIMIT_MAX)
+
+    # Rate limit response headers -- use tier-aware values from slowapi or sensible defaults
+    from config import DEFAULT_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW, TIER_RATE_LIMITS
+    tier = getattr(request.state, "subscription_tier", "free")
+    tier_max = TIER_RATE_LIMITS.get(tier, DEFAULT_RATE_LIMIT_MAX)
+
+    rate_limit_max = getattr(request.state, "rate_limit_max", None)
+    response.headers["X-RateLimit-Limit"] = str(rate_limit_max if rate_limit_max is not None else tier_max)
 
     # Always include remaining and reset headers
-    if request.state.rate_limit_remaining is not None:
+    if getattr(request.state, "rate_limit_remaining", None) is not None:
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
     else:
-        # Unauthenticated request: show full limit as remaining
-        response.headers["X-RateLimit-Remaining"] = str(rate_limit_max if rate_limit_max is not None else RATE_LIMIT_MAX)
+        # Unauthenticated or no state set: show tier limit as remaining
+        response.headers["X-RateLimit-Remaining"] = str(rate_limit_max if rate_limit_max is not None else tier_max)
 
-    if request.state.rate_limit_reset is not None:
+    if getattr(request.state, "rate_limit_reset", None) is not None:
         response.headers["X-RateLimit-Reset"] = str(request.state.rate_limit_reset)
     else:
         # Calculate next window boundary

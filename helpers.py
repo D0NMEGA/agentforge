@@ -39,8 +39,7 @@ from fastapi import HTTPException, Header, Depends, Query, Request
 
 from config import (
     MAX_MEMORY_VALUE_SIZE, MAX_QUEUE_PAYLOAD_SIZE,
-    RATE_LIMIT_WINDOW, RATE_LIMIT_MAX,
-    TIER_RATE_LIMITS, TIER_LIMITS,
+    TIER_LIMITS,
     ADMIN_PASSWORD_HASH, ADMIN_SESSION_TTL,
     ENCRYPTION_KEY, _fernet,
     JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_DAYS,
@@ -240,31 +239,6 @@ async def get_agent_id(request: Request) -> str:
             raise HTTPException(401, "Invalid API key")
 
         now = datetime.now(timezone.utc).isoformat()
-        # Rate limiting
-        window = int(time.time()) // RATE_LIMIT_WINDOW
-        db.execute("""
-            INSERT INTO rate_limits (agent_id, window_start, count)
-            VALUES (?, ?, 1)
-            ON CONFLICT(agent_id, window_start) DO UPDATE SET count = rate_limits.count + 1
-        """, (row["agent_id"], window))
-        rl = db.execute(
-            "SELECT count FROM rate_limits WHERE agent_id = ? AND window_start = ?",
-            (row["agent_id"], window)
-        ).fetchone()
-        current_count = rl["count"] if rl else 0
-        # Tier-aware rate limit lookup
-        owner_row = db.execute(
-            "SELECT u.subscription_tier FROM users u "
-            "JOIN agents a ON a.owner_id = u.user_id WHERE a.agent_id = ?",
-            (row["agent_id"],)
-        ).fetchone()
-        tier = (owner_row["subscription_tier"] if owner_row else None) or "free"
-        tier_limit = TIER_RATE_LIMITS.get(tier, TIER_RATE_LIMITS["free"])
-        request.state.rate_limit_max = tier_limit  # consumed by header middleware
-        request.state.rate_limit_remaining = max(0, tier_limit - current_count)
-        request.state.rate_limit_reset = (window + 1) * RATE_LIMIT_WINDOW
-        if current_count > tier_limit:
-            raise HTTPException(429, f"Rate limit exceeded ({tier_limit}/min for {tier} tier)")
 
         # Usage quota check (per owner's subscription tier)
         _check_usage_quota(db, row["agent_id"])
