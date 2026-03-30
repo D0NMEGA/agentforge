@@ -12,12 +12,12 @@ from db import get_db
 from helpers import get_agent_id
 from models import EventAckRequest, EventAckResponse, EventStreamItem
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.get("/v1/events/stream", response_model=EventStreamItem, tags=["Events"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def events_stream(request: Request, after: str = Query(None), agent_id: str = Depends(get_agent_id)):
     """Long-poll: waits up to 30s for first unacked event. Use ?after=event_id for cursor. Returns event or 204."""
     import asyncio
@@ -50,7 +50,7 @@ async def events_stream(request: Request, after: str = Query(None), agent_id: st
 
 
 @router.get("/v1/events", tags=["Events"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def events_poll(request: Request, after: str = Query(None), agent_id: str = Depends(get_agent_id)):
     """Return up to 20 unacknowledged events for agent. Use ?after=event_id for cursor-based pagination."""
     with get_db() as db:
@@ -81,7 +81,7 @@ async def events_poll(request: Request, after: str = Query(None), agent_id: str 
 
 
 @router.post("/v1/events/ack", response_model=EventAckResponse, tags=["Events"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 async def events_ack(request: Request, body: EventAckRequest, agent_id: str = Depends(get_agent_id)):
     """Mark event_ids as acknowledged."""
     if not body.event_ids:

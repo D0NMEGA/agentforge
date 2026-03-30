@@ -11,7 +11,7 @@ from fastapi.responses import Response
 
 from config import MAX_MEMORY_VALUE_SIZE
 from db import get_db
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 from helpers import (
     get_agent_id, _encrypt, _decrypt,
     _log_memory_access, _check_memory_visibility, _track_event,
@@ -40,7 +40,7 @@ router = APIRouter()
 
 
 @router.get("/v1/agents/{target_agent_id}/memory/{key}", tags=["Memory"], response_model=MemoryCrossAgentReadResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     # SEC-01: Always derive target namespace from target_agent_id auth identity, never from user input
@@ -82,7 +82,7 @@ def memory_get_cross_agent(request: Request, target_agent_id: str, key: str, nam
 
 
 @router.patch("/v1/memory/{key}/visibility", tags=["Memory"], response_model=MemoryVisibilityResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def memory_set_visibility(request: Request, key: str, req: MemoryVisibilityRequest, namespace: str = Query(None), agent_id: str = Depends(get_agent_id)):
     vis = req.visibility  # Validated by Pydantic Literal["private","public","shared"]
     sa_json = json.dumps(req.shared_agents) if req.shared_agents else None
@@ -101,7 +101,7 @@ def memory_set_visibility(request: Request, key: str, req: MemoryVisibilityReque
 # to prevent FastAPI matching "history" or "meta" as key values.
 
 @router.get("/v1/memory/{key}/history", tags=["Memory"], response_model=MemoryHistoryResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def memory_history(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """MEM-06: Return version history for a memory key."""
     resolved_ns = _resolve_namespace(namespace, agent_id)
@@ -127,7 +127,7 @@ def memory_history(request: Request, key: str, namespace: str = "default", agent
 
 
 @router.get("/v1/memory/{key}/meta", tags=["Memory"], response_model=MemoryMetaResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def memory_meta(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     """MEM-05: Return metadata for a memory key (writer, version, timestamps, namespace)."""
     resolved_ns = _resolve_namespace(namespace, agent_id)
@@ -152,7 +152,7 @@ def memory_meta(request: Request, key: str, namespace: str = "default", agent_id
 
 
 @router.post("/v1/memory", tags=["Memory"], response_model=MemorySetResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def memory_set(request: Request, req: MemorySetRequest, if_match: Optional[str] = Header(None, alias="If-Match"), agent_id: str = Depends(get_agent_id)):
     _validate_key(req.key)
     if "\x00" in req.value:
@@ -218,7 +218,7 @@ def memory_set(request: Request, req: MemorySetRequest, if_match: Optional[str] 
 
 
 @router.get("/v1/memory/{key}", response_model=MemoryGetResponse, tags=["Memory"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def memory_get(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     resolved_ns = _resolve_namespace(namespace, agent_id)
     now = datetime.now(timezone.utc).isoformat()
@@ -245,7 +245,7 @@ def memory_get(request: Request, key: str, namespace: str = "default", agent_id:
 
 
 @router.delete("/v1/memory/{key}", tags=["Memory"], response_model=MemoryDeleteResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def memory_delete(request: Request, key: str, namespace: str = "default", agent_id: str = Depends(get_agent_id)):
     resolved_ns = _resolve_namespace(namespace, agent_id)
     with get_db() as db:
@@ -257,7 +257,7 @@ def memory_delete(request: Request, key: str, namespace: str = "default", agent_
 
 
 @router.get("/v1/memory", response_model=MemoryListResponse, tags=["Memory"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def memory_list(request: Request, namespace: str = "default", prefix: str = "", limit: int = Query(50, ge=1, le=200), agent_id: str = Depends(get_agent_id)):
     resolved_ns = _resolve_namespace(namespace, agent_id)
     now = datetime.now(timezone.utc).isoformat()

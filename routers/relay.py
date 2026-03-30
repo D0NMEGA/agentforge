@@ -17,7 +17,7 @@ from models import (
     MessageStatusResponse, MessageTraceResponse, MessageHop, DeadLetterMessageListResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
@@ -32,7 +32,7 @@ def _record_hop(db, message_id: str, hop: str, status: str, recorded_at: str) ->
 
 
 @router.post("/v1/relay/send", tags=["Relay"], response_model=RelaySendResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def relay_send(request: Request, msg: RelayMessage, agent_id: str = Depends(get_agent_id)):
     """Send a message to another agent. Unknown recipients are dead-lettered (not 404)."""
     message_id = f"msg_{uuid.uuid4().hex[:16]}"
@@ -109,7 +109,7 @@ def relay_send(request: Request, msg: RelayMessage, agent_id: str = Depends(get_
 
 
 @router.get("/v1/messages/dead-letter", tags=["Relay"], response_model=DeadLetterMessageListResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def message_dead_letter_list(request: Request, agent_id: str = Depends(get_agent_id)):
     """Return dead-lettered messages sent by this agent."""
     with get_db() as db:
@@ -123,7 +123,7 @@ def message_dead_letter_list(request: Request, agent_id: str = Depends(get_agent
 
 
 @router.get("/v1/messages/{message_id}/status", tags=["Relay"], response_model=MessageStatusResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def message_status(request: Request, message_id: str, agent_id: str = Depends(get_agent_id)):
     """Return delivery status for a message. Accessible by sender or recipient only."""
     with get_db() as db:
@@ -142,7 +142,7 @@ def message_status(request: Request, message_id: str, agent_id: str = Depends(ge
 
 
 @router.get("/v1/messages/{message_id}/trace", tags=["Relay"], response_model=MessageTraceResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def message_trace(request: Request, message_id: str, agent_id: str = Depends(get_agent_id)):
     """Return ordered hop history for a message. Accessible by sender or recipient."""
     with get_db() as db:
@@ -164,7 +164,7 @@ def message_trace(request: Request, message_id: str, agent_id: str = Depends(get
 
 
 @router.get("/v1/relay/inbox", tags=["Relay"], response_model=RelayInboxResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def relay_inbox(
     request: Request,
     channel: Optional[str] = Query(None, description="Filter by channel. Omit for all channels."),
@@ -265,7 +265,7 @@ def relay_inbox(
     return {"channel": channel, "messages": messages, "count": len(messages), "next_cursor": next_cursor}
 
 @router.post("/v1/relay/{message_id}/read", tags=["Relay"], response_model=RelayMarkReadResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def relay_mark_read(request: Request, message_id: str, agent_id: str = Depends(get_agent_id)):
     """Mark a message as read. Updates status lifecycle and records a hop."""
     now = datetime.now(timezone.utc).isoformat()

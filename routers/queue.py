@@ -12,12 +12,12 @@ from db import get_db, DB_BACKEND
 from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event
 from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest, QueueCompleteRequest
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.post("/v1/queue/submit", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def queue_submit(request: Request, req: QueueSubmitRequest, agent_id: str = Depends(get_agent_id)):
     job_id = f"job_{uuid.uuid4().hex[:16]}"; now = datetime.now(timezone.utc).isoformat()
     payload_str = json.dumps(req.payload) if isinstance(req.payload, dict) else req.payload
@@ -30,7 +30,7 @@ def queue_submit(request: Request, req: QueueSubmitRequest, agent_id: str = Depe
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name, "max_attempts": req.max_attempts}
 
 @router.get("/v1/queue/dead_letter", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def queue_dead_letter_list(request: Request, queue_name: Optional[str] = None, limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0), agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         if queue_name:
@@ -40,7 +40,7 @@ def queue_dead_letter_list(request: Request, queue_name: Optional[str] = None, l
     return {"jobs": [dict(r) for r in rows], "count": len(rows)}
 
 @router.get("/v1/queue/{job_id}", response_model=QueueJobResponse, tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def queue_status(request: Request, job_id: str, agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         row = db.execute("SELECT * FROM queue WHERE job_id=? AND agent_id=?", (job_id, agent_id)).fetchone()
@@ -50,7 +50,7 @@ def queue_status(request: Request, job_id: str, agent_id: str = Depends(get_agen
         return QueueJobResponse(**d)
 
 @router.post("/v1/queue/claim", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 async def queue_claim(request: Request, queue_name: str = Query("default"), agent_id: str = Depends(get_agent_id)):
     # Accept queue_name from body JSON (body takes priority over query param)
     try:
@@ -109,7 +109,7 @@ async def queue_claim(request: Request, queue_name: str = Query("default"), agen
         }
 
 @router.post("/v1/queue/{job_id}/complete", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def queue_complete(request: Request, job_id: str, body: Optional[QueueCompleteRequest] = None, agent_id: str = Depends(get_agent_id)):
     result = ""
     if body and body.result is not None:
@@ -126,7 +126,7 @@ def queue_complete(request: Request, job_id: str, body: Optional[QueueCompleteRe
     return {"job_id": job_id, "status": "completed"}
 
 @router.get("/v1/queue", response_model=QueueListResponse, tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def queue_list(request: Request, queue_name: str = "default", status: Optional[str] = None, limit: int = Query(20, ge=1, le=100), agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         if status:
@@ -136,7 +136,7 @@ def queue_list(request: Request, queue_name: str = "default", status: Optional[s
     return {"queue_name": queue_name, "jobs": [dict(r) for r in rows], "count": len(rows)}
 
 @router.post("/v1/queue/{job_id}/fail", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def queue_fail(request: Request, job_id: str, req: QueueFailRequest, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc); now_iso = now.isoformat(); fire_webhook_data = None
     with get_db() as db:
@@ -159,7 +159,7 @@ def queue_fail(request: Request, job_id: str, req: QueueFailRequest, agent_id: s
     return result
 
 @router.post("/v1/queue/{job_id}/replay", tags=["Queue"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def queue_replay(request: Request, job_id: str, agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:

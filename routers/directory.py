@@ -22,13 +22,13 @@ from models import (
     AgentRegisterRequest, AgentCardResponse, AccountAgentsResponse, AccountActivityResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.post("/v1/agents/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
 @router.post("/v1/heartbeat", response_model=HeartbeatResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatRequest(), agent_id: str = Depends(get_agent_id)):
     """Send a heartbeat to indicate this agent is alive. Call periodically (default every 60s)."""
     now = datetime.now(timezone.utc).isoformat()
@@ -51,7 +51,7 @@ async def agent_heartbeat(request: Request, req: HeartbeatRequest = HeartbeatReq
 
 
 @router.put("/v1/directory/me", response_model=DirectoryUpdateResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def directory_update(request: Request, req: DirectoryUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your agent's directory listing."""
     # Sanitize text fields to prevent XSS
@@ -80,7 +80,7 @@ def directory_update(request: Request, req: DirectoryUpdateRequest, agent_id: st
     return {"status": "updated", "agent_id": agent_id, "public": current_public}
 
 @router.get("/v1/directory/me", tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_me(request: Request, agent_id: str = Depends(get_agent_id)):
     """Get your own directory profile."""
     with get_db() as db:
@@ -101,7 +101,7 @@ def directory_me(request: Request, agent_id: str = Depends(get_agent_id)):
 
 @router.get("/v1/directory", response_model=DirectoryListResponse, tags=["Directory"])
 @router.get("/v1/directory/agents", response_model=DirectoryListResponse, tags=["Directory"], include_in_schema=False)
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def directory_list(request: Request,
     capability: Optional[str] = None,
     q: Optional[str] = None,
@@ -149,7 +149,7 @@ async def directory_list(request: Request,
     return result
 
 @router.get("/v1/leaderboard", response_model=LeaderboardResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def leaderboard(request: Request, 
     sort_by: str = Query("reputation", regex="^(reputation|credits|tasks_completed|requests)$"),
     limit: int = Query(20, ge=1, le=100)
@@ -218,7 +218,7 @@ def leaderboard(request: Request,
     }
 
 @router.get("/v1/directory/stats", response_model=DirectoryStatsResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_stats(request: Request):
     """Public directory statistics. No auth required."""
     with get_db() as db:
@@ -288,7 +288,7 @@ class CollaborationRequest(BaseModel):
     rating: int = Field(..., ge=1, le=5, description="Rating 1-5 for the partner")
 
 @router.get("/v1/directory/search", response_model=DirectorySearchResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_search(request: Request, 
     q: Optional[str] = Query(None, description="Text search query — matches name, description, capabilities, skills, interests"),
     capability: Optional[str] = None,
@@ -351,7 +351,7 @@ def directory_search(request: Request,
     return {"agents": agents, "count": len(agents)}
 
 @router.patch("/v1/directory/me/status", response_model=DirectoryStatusUpdateResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def directory_status_update(request: Request, req: StatusUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update your availability status."""
     updates = []
@@ -375,7 +375,7 @@ def directory_status_update(request: Request, req: StatusUpdateRequest, agent_id
     return {"status": "updated", "agent_id": agent_id}
 
 @router.post("/v1/directory/collaborations", response_model=CollaborationResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def log_collaboration(request: Request, req: CollaborationRequest, agent_id: str = Depends(get_agent_id)):
     """Log a collaboration outcome. Updates the partner's reputation."""
     if req.outcome not in ("success", "failure", "partial"):
@@ -410,7 +410,7 @@ def log_collaboration(request: Request, req: CollaborationRequest, agent_id: str
     }
 
 @router.get("/v1/directory/collaborations", tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def get_collaborations(request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -428,7 +428,7 @@ def get_collaborations(request: Request,
 
 
 @router.get("/v1/directory/match", response_model=DirectoryMatchResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_match(request: Request,
     need: str = Query(..., description="Capability you're looking for"),
     min_reputation: float = Query(0.0, ge=0.0),
@@ -455,7 +455,7 @@ def directory_match(request: Request,
     return {"matches": matches, "count": len(matches), "need": need}
 
 @router.get("/v1/directory/network", response_model=DirectoryNetworkResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_network(request: Request):
     """Get network graph data for agent visualization. No auth required.
     Returns nodes (agents) and edges (collaborations/messages between them)."""
@@ -559,7 +559,7 @@ def directory_network(request: Request):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/v1/agents/register", tags=["Registry"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def agent_register(request: Request, req: AgentRegisterRequest, agent_id: str = Depends(get_agent_id)):
     """Register or update this agent's capabilities, skills, and role. DISC-02."""
     now = datetime.now(timezone.utc).isoformat()
@@ -598,7 +598,7 @@ def agent_register(request: Request, req: AgentRegisterRequest, agent_id: str = 
 
 
 @router.get("/v1/agents/{agent_id}/card", response_model=AgentCardResponse, tags=["Registry"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def agent_card(request: Request, agent_id: str):
     """Return an A2A-style Agent Card for a given agent. DISC-04. No auth required."""
     with get_db() as db:
@@ -643,7 +643,7 @@ def agent_card(request: Request, agent_id: str):
 
 
 @router.get("/v1/account/{account_id}/agents", response_model=AccountAgentsResponse, tags=["Registry"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def account_agents(
     request: Request,
     account_id: str,
@@ -680,7 +680,7 @@ def account_agents(
 
 
 @router.get("/v1/account/{account_id}/activity", response_model=AccountActivityResponse, tags=["Registry"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def account_activity(
     request: Request,
     account_id: str,
@@ -708,7 +708,7 @@ def account_activity(
 
 
 @router.get("/v1/directory/{agent_id}", response_model=DirectoryProfileResponse, tags=["Directory"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def directory_profile(request: Request, agent_id: str):
     """Get a public agent profile. No auth required. Returns 404 if agent is private."""
     with get_db() as db:

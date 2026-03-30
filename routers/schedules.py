@@ -12,12 +12,12 @@ from db import get_db
 from helpers import get_agent_id, _encrypt, _decrypt
 from models import ScheduledTaskRequest, ScheduleUpdateRequest, ScheduledTaskResponse, ScheduleListResponse
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.post("/v1/schedules", response_model=ScheduledTaskResponse, tags=["Schedules"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def schedule_create(request: Request, req: ScheduledTaskRequest, agent_id: str = Depends(get_agent_id)):
     """Create a cron-style recurring job schedule."""
     try:
@@ -42,7 +42,7 @@ def schedule_create(request: Request, req: ScheduledTaskRequest, agent_id: str =
     )
 
 @router.get("/v1/schedules", response_model=ScheduleListResponse, tags=["Schedules"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def schedule_list(request: Request, agent_id: str = Depends(get_agent_id)):
     """List your scheduled tasks."""
     with get_db() as db:
@@ -57,7 +57,7 @@ def schedule_list(request: Request, agent_id: str = Depends(get_agent_id)):
     }
 
 @router.get("/v1/schedules/{task_id}", tags=["Schedules"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def schedule_get(request: Request, task_id: str, agent_id: str = Depends(get_agent_id)):
     """Get details of a scheduled task."""
     with get_db() as db:
@@ -72,7 +72,7 @@ def schedule_get(request: Request, task_id: str, agent_id: str = Depends(get_age
     return d
 
 @router.patch("/v1/schedules/{task_id}", tags=["Schedules"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def schedule_update(request: Request, task_id: str, req: ScheduleUpdateRequest, agent_id: str = Depends(get_agent_id)):
     """Update a scheduled task. Supports enabling/disabling and updating fields."""
     with get_db() as db:
@@ -126,7 +126,7 @@ def schedule_update(request: Request, task_id: str, req: ScheduleUpdateRequest, 
     return {"task_id": task_id, "enabled": enabled_val}
 
 @router.delete("/v1/schedules/{task_id}", tags=["Schedules"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def schedule_delete(request: Request, task_id: str, agent_id: str = Depends(get_agent_id)):
     """Delete a scheduled task."""
     with get_db() as db:

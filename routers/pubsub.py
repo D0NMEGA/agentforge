@@ -19,7 +19,7 @@ from models import (
     PubSubSubscriptionsResponse, PubSubPublishResponse, PubSubChannelsResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
@@ -32,7 +32,7 @@ _MAX_SUBSCRIPTIONS = 50
 _MAX_PUBLISHES_PER_MINUTE = 100
 
 @router.post("/v1/pubsub/subscribe", tags=["Pub/Sub"], response_model=PubSubSubscribeResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def pubsub_subscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Subscribe to a broadcast channel. Supports wildcard patterns (e.g. 'task.*')."""
     # Validate channel/pattern format
@@ -65,7 +65,7 @@ def pubsub_subscribe(request: Request, req: PubSubSubscribeRequest, agent_id: st
     return {"channel": req.channel, "status": "subscribed", "subscribed_at": now}
 
 @router.post("/v1/pubsub/unsubscribe", tags=["Pub/Sub"], response_model=PubSubUnsubscribeResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def pubsub_unsubscribe(request: Request, req: PubSubSubscribeRequest, agent_id: str = Depends(get_agent_id)):
     """Unsubscribe from a broadcast channel. Idempotent -- returns 200 even if not subscribed."""
     with get_db() as db:
@@ -79,7 +79,7 @@ def pubsub_unsubscribe(request: Request, req: PubSubSubscribeRequest, agent_id: 
     return {"channel": req.channel, "status": "unsubscribed"}
 
 @router.get("/v1/pubsub/subscriptions", tags=["Pub/Sub"], response_model=PubSubSubscriptionsResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def pubsub_list_subscriptions(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all channels this agent is subscribed to."""
     with get_db() as db:
@@ -90,7 +90,7 @@ def pubsub_list_subscriptions(request: Request, agent_id: str = Depends(get_agen
     return {"subscriptions": [dict(r) for r in rows], "count": len(rows)}
 
 @router.post("/v1/pubsub/publish", tags=["Pub/Sub"], response_model=PubSubPublishResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: str = Depends(get_agent_id)):
     """Publish an event to all subscribers matching the channel pattern."""
     # EVT-05: enforce 100 publishes/minute rate limit
@@ -169,7 +169,7 @@ async def pubsub_publish(request: Request, req: PubSubPublishRequest, agent_id: 
     }
 
 @router.get("/v1/pubsub/channels", tags=["Pub/Sub"], response_model=PubSubChannelsResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def pubsub_list_channels(request: Request, agent_id: str = Depends(get_agent_id)):
     """List all active pub/sub channels with subscriber counts."""
     with get_db() as db:

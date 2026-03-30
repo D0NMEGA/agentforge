@@ -21,7 +21,7 @@ from db import get_db
 from helpers import hash_key, _encrypt, _decrypt, _sanitize_text, _fire_webhooks, _queue_agent_event
 from config import logger
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter(tags=["Chat Gateway"])
 
@@ -65,7 +65,7 @@ def _chat_auth(key: str, request: Request) -> str:
 # -- Info endpoint -------------------------------------------------------------
 
 @router.get("/v1/chat", response_class=PlainTextResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_gateway_info(request: Request):
     """Chat Gateway info page. Explains what this is and how to use it."""
     return """MoltGrid Chat Gateway
@@ -95,7 +95,7 @@ Docs: https://api.moltgrid.net/api-docs
 # -- Heartbeat -----------------------------------------------------------------
 
 @router.get("/v1/chat/heartbeat")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_heartbeat(request: Request, 
     key: str = Query(..., description="API key"),
     status: str = Query("online", description="Agent status"),
@@ -115,7 +115,7 @@ def chat_heartbeat(request: Request,
 # -- Who Am I ------------------------------------------------------------------
 
 @router.get("/v1/chat/whoami")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_whoami(request: Request, key: str = Query(..., description="API key")):
     """Get your agent profile."""
     request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
@@ -140,7 +140,7 @@ def chat_whoami(request: Request, key: str = Query(..., description="API key")):
 # -- Memory Set ----------------------------------------------------------------
 
 @router.get("/v1/chat/memory/set")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_memory_set(request: Request, 
     key: str = Query(..., description="API key"),
     k: str = Query(..., description="Memory key", max_length=128),
@@ -165,7 +165,7 @@ def chat_memory_set(request: Request,
 # -- Memory Get ----------------------------------------------------------------
 
 @router.get("/v1/chat/memory/get")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_memory_get(request: Request, 
     key: str = Query(..., description="API key"),
     k: str = Query(..., description="Memory key"),
@@ -188,7 +188,7 @@ def chat_memory_get(request: Request,
 # -- Relay Send ----------------------------------------------------------------
 
 @router.get("/v1/chat/relay/send")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_relay_send(request: Request, 
     key: str = Query(..., description="API key"),
     to: str = Query(..., description="Recipient agent_id"),
@@ -222,7 +222,7 @@ def chat_relay_send(request: Request,
 # -- Relay Inbox ---------------------------------------------------------------
 
 @router.get("/v1/chat/relay/inbox")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_relay_inbox(request: Request, 
     key: str = Query(..., description="API key"),
     channel: str = Query("direct", description="Channel"),
@@ -248,7 +248,7 @@ def chat_relay_inbox(request: Request,
 # -- Directory Update ----------------------------------------------------------
 
 @router.get("/v1/chat/directory/update")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_directory_update(request: Request, 
     key: str = Query(..., description="API key"),
     desc: str = Query(None, description="Agent description", max_length=500),
@@ -287,7 +287,7 @@ def chat_directory_update(request: Request,
 # -- Directory Search (public, no auth) ----------------------------------------
 
 @router.get("/v1/chat/directory/search")
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def chat_directory_search(request: Request, 
     q: str = Query("", description="Search query"),
     skill: str = Query(None, description="Filter by skill"),

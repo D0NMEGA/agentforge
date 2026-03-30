@@ -23,12 +23,12 @@ from models import (
     MoltBookEventResponse, MoltBookRegisterResponse, MoltBookFeedResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.post("/v1/agents/{agent_id}/integrations", response_model=IntegrationCreateResponse, tags=["Integrations"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def integration_create(request: Request, agent_id: str, req: IntegrationCreateRequest, caller_id: str = Depends(get_agent_id)):
     """Link an external platform to this agent. Agent must own itself (caller == agent_id)."""
     if caller_id != agent_id:
@@ -49,7 +49,7 @@ def integration_create(request: Request, agent_id: str, req: IntegrationCreateRe
             "status": req.status, "created_at": now}
 
 @router.get("/v1/agents/{agent_id}/integrations", response_model=IntegrationListResponse, tags=["Integrations"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def integration_list(request: Request, agent_id: str, caller_id: str = Depends(get_agent_id)):
     """List all platform integrations linked to an agent. Caller must be the agent."""
     if caller_id != agent_id:
@@ -78,7 +78,7 @@ class MoltBookEventRequest(BaseModel):
     metadata: Optional[dict] = Field(None, description="Additional event metadata")
 
 @router.post("/v1/moltbook/events", response_model=MoltBookEventResponse, tags=["Integrations"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def moltbook_ingest_event(request: Request, req: MoltBookEventRequest, agent_id: str = Depends(get_agent_id)):
     """Ingest a MoltBook social action (post, reply, upvote) as an analytics_event with source='moltbook'."""
     event_id = f"evt_{uuid.uuid4().hex[:16]}"
@@ -107,7 +107,7 @@ class MoltBookRegisterRequest(BaseModel):
 
 # TODO: Add IP-based rate limiting in Phase 8
 @router.post("/v1/moltbook/register", response_model=MoltBookRegisterResponse, tags=["Integrations"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def moltbook_register(request: Request, req: MoltBookRegisterRequest, x_service_key: str = Header(None)):
     """Auto-provision a MoltGrid agent for a new MoltBook user. Requires X-Service-Key header."""
     import main as _m
@@ -142,7 +142,7 @@ def moltbook_register(request: Request, req: MoltBookRegisterRequest, x_service_
 
 
 @router.get("/v1/moltbook/feed", response_model=MoltBookFeedResponse, tags=["Integrations"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def moltbook_feed(request: Request):
     """Return last 20 moltbook-sourced analytics events as a social feed. Public endpoint."""
     with get_db() as db:
@@ -274,7 +274,7 @@ def _check_onboarding_progress(db, agent_id: str) -> dict:
     }
 
 @router.post("/v1/onboarding/start", response_model=OnboardingResponse, tags=["Onboarding"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def onboarding_start(request: Request, agent_id: str = Depends(get_agent_id)):
     """Start the interactive onboarding tutorial. Returns a step-by-step checklist to guide you through all MoltGrid features."""
     with get_db() as db:
@@ -282,7 +282,7 @@ def onboarding_start(request: Request, agent_id: str = Depends(get_agent_id)):
     return OnboardingResponse(**result)
 
 @router.get("/v1/onboarding/status", response_model=OnboardingResponse, tags=["Onboarding"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def onboarding_status(request: Request, agent_id: str = Depends(get_agent_id)):
     """Check your onboarding progress without modifying anything."""
     with get_db() as db:
@@ -293,7 +293,7 @@ def onboarding_status(request: Request, agent_id: str = Depends(get_agent_id)):
 GUIDE_PLATFORMS = {"quickstart", "python-sdk", "typescript-sdk", "webhooks", "mcp", "langgraph", "crewai", "openai"}
 
 @router.get("/v1/guides/{platform}", tags=["Documentation"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def get_guide(request: Request, platform: str):
     """Serve getting-started guide markdown for the specified platform."""
     if platform not in GUIDE_PLATFORMS:

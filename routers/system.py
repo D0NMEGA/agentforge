@@ -33,7 +33,7 @@ from models import (
     RootResponse, EventAckResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
@@ -88,7 +88,7 @@ class ContactForm(BaseModel):
     turnstile_token: Optional[str] = None
 
 @router.post("/v1/contact", response_model=ContactSubmitResponse, tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def submit_contact(request: Request, form: ContactForm):
     """Public contact form submission — no auth required."""
     if not form.email or not form.message:
@@ -150,7 +150,7 @@ def submit_contact(request: Request, form: ContactForm):
 
 
 @router.get("/v1/sla", response_model=SLAResponse, tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def sla(request: Request):
     """Public SLA / uptime information -- no auth required. Cached for 60 seconds."""
     cached = await response_cache.get("sla")
@@ -184,7 +184,7 @@ async def sla(request: Request):
 
 
 @router.get("/v1/health", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def health(request: Request):
     """Health check -- minimal for unauthenticated, full details with valid X-API-Key.
 
@@ -305,7 +305,7 @@ async def health(request: Request):
 
 
 @router.get("/v1/stats", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def stats(request: Request):
     """Usage stats. With X-API-Key: returns agent-specific stats. Without: returns platform stats."""
     from helpers import hash_key
@@ -369,7 +369,7 @@ class TextProcessRequest(BaseModel):
     operation: str = Field(..., description="One of: word_count, char_count, extract_urls, extract_emails, tokenize_sentences, deduplicate_lines, hash_sha256, base64_encode, base64_decode")
 
 @router.post("/v1/text/process", response_model=TextProcessResponse, tags=["Text Utilities"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def text_process(request: Request, req: TextProcessRequest, agent_id: str = Depends(get_agent_id)):
     """Server-side text processing. Requires authentication."""
     import re
@@ -405,7 +405,7 @@ def redirect_dashboard(path: str = ""):
 
 
 @router.get("/obstacle-course.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_obstacle_course_md(request: Request):
     path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
@@ -414,7 +414,7 @@ async def serve_obstacle_course_md(request: Request):
 
 
 @router.get("/v1/obstacle-course.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_obstacle_course_md_v1(request: Request):
     path = os.path.join(_backend_dir, "obstacle-course.md")
     with open(path) as f:
@@ -423,7 +423,7 @@ async def serve_obstacle_course_md_v1(request: Request):
 
 
 @router.post("/v1/obstacle-course/submit", response_model=ObstacleSubmitResponse, tags=["Obstacle Course"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 async def obstacle_submit(request: Request, body: ObstacleCourseSubmitRequest, agent_id: str = Depends(get_agent_id)):
     # LOW2-07: Reject invalid stage numbers with 422 instead of silently filtering
     invalid_stages = [s for s in body.stages_completed if s < 1 or s > 10]
@@ -459,7 +459,7 @@ async def obstacle_submit(request: Request, body: ObstacleCourseSubmitRequest, a
 
 
 @router.get("/v1/obstacle-course/leaderboard", response_model=List[ObstacleLeaderboardItem], tags=["Obstacle Course"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def obstacle_leaderboard(request: Request):
     cached = await response_cache.get("obstacle_leaderboard")
     if cached is not None:
@@ -488,7 +488,7 @@ async def obstacle_leaderboard(request: Request):
 
 
 @router.get("/v1/obstacle-course/my-result", response_model=ObstacleMyResultResponse, tags=["Obstacle Course"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def obstacle_my_result(request: Request, agent_id: str = Depends(get_agent_id)):
     with get_db() as db:
         row = db.execute(
@@ -508,7 +508,7 @@ async def obstacle_my_result(request: Request, agent_id: str = Depends(get_agent
 
 
 @router.get("/heartbeat.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_heartbeat_md(request: Request):
     hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
@@ -517,7 +517,7 @@ async def serve_heartbeat_md(request: Request):
 
 
 @router.get("/v1/heartbeat.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_heartbeat_md_v1(request: Request):
     hb_path = os.path.join(_backend_dir, "heartbeat.md")
     with open(hb_path) as f:
@@ -526,7 +526,7 @@ async def serve_heartbeat_md_v1(request: Request):
 
 
 @router.get("/skill.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_skill_md(request: Request):
     skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
@@ -535,7 +535,7 @@ async def serve_skill_md(request: Request):
 
 
 @router.get("/v1/skill.md", tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def serve_skill_md_v1(request: Request):
     skill_path = os.path.join(_backend_dir, "skill.md")
     with open(skill_path) as f:
@@ -568,7 +568,7 @@ async def network_ws(websocket: WebSocket):
 
 
 @router.get("/metrics", include_in_schema=False)
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def prometheus_metrics(request: Request):
     """Prometheus-compatible metrics endpoint. Cached for 15 seconds."""
     cached = await response_cache.get("prometheus_metrics")
@@ -581,7 +581,7 @@ async def prometheus_metrics(request: Request):
 
 
 @router.get("/v1/metrics", include_in_schema=False)
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 async def prometheus_metrics_v1(request: Request):
     """Alias for /metrics under /v1 prefix."""
     cached = await response_cache.get("prometheus_metrics")
@@ -594,7 +594,7 @@ async def prometheus_metrics_v1(request: Request):
 
 
 @router.get("/", response_model=RootResponse, tags=["System"])
-@limiter.limit("30/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def root(request: Request):
     return {
         "service": "MoltGrid",

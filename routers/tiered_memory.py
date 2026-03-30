@@ -16,7 +16,7 @@ from models import (
     TieredSummarizeResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter(tags=["tiered-memory"])
 
@@ -27,7 +27,7 @@ def _cosine_similarity(vec1, vec2):
 
 
 @router.post("/v1/tiered/store_event", response_model=TieredStoreEventResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def tiered_store_event(request: Request, req: TieredStoreEventRequest, agent_id: str = Depends(get_agent_id)):
     """Append an event to the session buffer (Tier 1). Optionally persist to mid-term notes (Tier 2)."""
     if req.persist and not req.note_key:
@@ -95,7 +95,7 @@ def tiered_store_event(request: Request, req: TieredStoreEventRequest, agent_id:
 
 
 @router.post("/v1/tiered/recall", response_model=TieredRecallResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def tiered_recall(request: Request, req: TieredRecallRequest, agent_id: str = Depends(get_agent_id)):
     """Search across mid-term memory (Tier 2) and long-term vector store (Tier 3)."""
     results = []
@@ -161,7 +161,7 @@ def tiered_recall(request: Request, req: TieredRecallRequest, agent_id: str = De
 
 
 @router.post("/v1/tiered/summarize/{session_id}", response_model=TieredSummarizeResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def tiered_summarize(request: Request, session_id: str, agent_id: str = Depends(get_agent_id)):
     """Summarize a session and promote the summary to the long-term vector store (Tier 3)."""
     now = datetime.now(timezone.utc).isoformat()
