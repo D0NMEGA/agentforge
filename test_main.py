@@ -2183,31 +2183,43 @@ class TestBilling:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestVectorMemory:
+    def _fake_embed(self, text):
+        """Deterministic fake embeddings that preserve semantic ordering."""
+        import numpy as np
+        rng = np.random.RandomState(hash(text) % 2**31)
+        base = rng.randn(384).astype(np.float32)
+        # Bias ML-related texts to be similar to each other
+        ml_keywords = ["machine", "learning", "programming", "data", "intelligence", "model", "training"]
+        if any(kw in text.lower() for kw in ml_keywords):
+            base[:10] += 1.0  # shift ML-related texts into same region
+        return (base / np.linalg.norm(base)).tolist()
+
     def test_vector_upsert_and_search(self):
         """Test storing docs and semantic search - most relevant should be first."""
         _, _, h = register_agent("vector-bot")
 
-        # Store 3 documents about different topics
-        client.post("/v1/vector/upsert", json={
-            "key": "doc1",
-            "text": "Python is a programming language for data science and machine learning",
-        }, headers=h)
+        with patch("helpers._embed_text", side_effect=self._fake_embed):
+            # Store 3 documents about different topics
+            client.post("/v1/vector/upsert", json={
+                "key": "doc1",
+                "text": "Python is a programming language for data science and machine learning",
+            }, headers=h)
 
-        client.post("/v1/vector/upsert", json={
-            "key": "doc2",
-            "text": "Dogs are loyal pets that love to play fetch and go for walks",
-        }, headers=h)
+            client.post("/v1/vector/upsert", json={
+                "key": "doc2",
+                "text": "Dogs are loyal pets that love to play fetch and go for walks",
+            }, headers=h)
 
-        client.post("/v1/vector/upsert", json={
-            "key": "doc3",
-            "text": "Machine learning models require training data and computational resources",
-        }, headers=h)
+            client.post("/v1/vector/upsert", json={
+                "key": "doc3",
+                "text": "Machine learning models require training data and computational resources",
+            }, headers=h)
 
-        # Search for programming-related content
-        r = client.post("/v1/vector/search", json={
-            "query": "artificial intelligence and deep learning",
-            "limit": 3
-        }, headers=h)
+            # Search for programming-related content
+            r = client.post("/v1/vector/search", json={
+                "query": "artificial intelligence and deep learning",
+                "limit": 3
+            }, headers=h)
 
         assert r.status_code == 200
         data = r.json()
