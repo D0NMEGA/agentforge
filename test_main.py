@@ -306,6 +306,40 @@ class TestQueue:
         claimed = client.post("/v1/queue/claim", headers=h)
         assert claimed.json()["payload"] == "high"
 
+    def test_claim_populates_claimed_by(self):
+        """QUEUE-02: claimed_by is populated on claim."""
+        _, _, h = register_agent()
+        client.post("/v1/queue/submit", json={"payload": "work"}, headers=h)
+        claimed = client.post("/v1/queue/claim", headers=h)
+        assert claimed.status_code == 200
+        assert "claimed_by" in claimed.json()
+        assert claimed.json()["claimed_by"] is not None
+
+    def test_claim_sets_claimed_by_on_job(self):
+        """QUEUE-02: GET /v1/queue/{id} shows claimed_by after claim."""
+        agent_id, _, h = register_agent()
+        r = client.post("/v1/queue/submit", json={"payload": "work"}, headers=h)
+        job_id = r.json()["job_id"]
+        client.post("/v1/queue/claim", headers=h)
+        status = client.get(f"/v1/queue/{job_id}", headers=h)
+        assert status.json().get("claimed_by") is not None
+
+    def test_claim_atomic_no_double_claim(self):
+        """QUEUE-01: Only one agent can claim a given job."""
+        _, _, h1 = register_agent()
+        _, _, h2 = register_agent()
+        # Agent 1 submits a single job
+        client.post("/v1/queue/submit", json={"payload": "single_job"}, headers=h1)
+        # Both agents try to claim
+        r1 = client.post("/v1/queue/claim", headers=h1)
+        r2 = client.post("/v1/queue/claim", headers=h2)
+        # One gets the job, the other gets empty
+        results = [r1.json(), r2.json()]
+        claimed = [r for r in results if r.get("job_id")]
+        empty = [r for r in results if r.get("status") == "empty"]
+        assert len(claimed) == 1, f"Expected exactly 1 claim, got {len(claimed)}"
+        assert len(empty) == 1, f"Expected exactly 1 empty, got {len(empty)}"
+
     def test_list_with_status_filter(self):
         _, _, h = register_agent()
         client.post("/v1/queue/submit", json={"payload": "a"}, headers=h)
