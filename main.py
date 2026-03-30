@@ -137,6 +137,7 @@ async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
         "endpoint_category": endpoint_category,
         "request_id": request_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "retryable": True,
     }
 
     headers = {"Retry-After": str(retry_after_seconds)}
@@ -377,6 +378,60 @@ button{color:#e4e4ef!important;}
 # ─── Exception Handlers ─────────────────────────────────────────────────────
 # OPS-01 + OPS-05: All error responses use structured ErrorResponse schema.
 # Fields: error, message, request_id, timestamp, retry_after_seconds.
+# ERR-01..ERR-05: Enhanced with param, retryable, suggestion, valid_values, details.
+
+_RETRYABLE_STATUS_CODES = frozenset({429, 409, 503})
+
+
+def _build_validation_detail(err: dict) -> dict:
+    """Build a structured detail entry for a single Pydantic validation error.
+
+    Extracts param, suggestion, and valid_values from the error context so
+    agents can programmatically understand and fix bad requests (ERR-01..ERR-04).
+    """
+    loc = err.get("loc", [])
+    # Skip leading "body" path segment -- it is an artifact of Pydantic body parsing
+    field_parts = [str(part) for part in loc if part != "body"]
+    field = ".".join(field_parts) if field_parts else ""
+
+    error_type = err.get("type", "")
+    ctx = err.get("ctx", {}) or {}
+
+    suggestion = None
+    valid_values = None
+
+    if error_type == "literal_error":
+        # Pydantic v2 puts "expected" in ctx for Literal/enum fields
+        expected_raw = ctx.get("expected", "")
+        if expected_raw:
+            # expected_raw is like "'private' or 'public' or 'shared'"
+            import re as _re_ve
+            candidates = _re_ve.findall(r"'([^']+)'", expected_raw)
+            if candidates:
+                valid_values = candidates
+                suggestion = "Must be one of: " + ", ".join(candidates)
+            else:
+                suggestion = f"Must be one of: {expected_raw}"
+    elif error_type == "missing":
+        suggestion = "This field is required"
+    elif error_type.startswith("string_too_"):
+        limit_val = ctx.get("max_length") or ctx.get("min_length")
+        if error_type == "string_too_long" and ctx.get("max_length") is not None:
+            suggestion = f"Must be at most {ctx['max_length']} characters"
+        elif error_type == "string_too_short" and ctx.get("min_length") is not None:
+            suggestion = f"Must be at least {ctx['min_length']} characters"
+        elif limit_val is not None:
+            suggestion = f"String length constraint: {limit_val} characters"
+
+    return {
+        "field": field,
+        "param": field,
+        "message": err.get("msg", ""),
+        "type": error_type,
+        "suggestion": suggestion,
+        "valid_values": valid_values,
+    }
+
 
 def _retry_after_for_status(status_code: int):
     """Return retry_after_seconds hint based on HTTP status code."""
@@ -404,6 +459,11 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "retry_after_seconds": retry_after,
+            "retryable": exc.status_code in _RETRYABLE_STATUS_CODES,
+            "param": None,
+            "suggestion": None,
+            "valid_values": None,
+            "details": [],
         },
         headers=headers,
     )
@@ -423,6 +483,11 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "retry_after_seconds": retry_after,
+            "retryable": exc.status_code in _RETRYABLE_STATUS_CODES,
+            "param": None,
+            "suggestion": None,
+            "valid_values": None,
+            "details": [],
         },
         headers=headers,
     )
@@ -430,14 +495,8 @@ async def starlette_http_exception_handler(request: Request, exc: StarletteHTTPE
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     request_id = getattr(request.state, "request_id", None)
-    details = []
-    for err in exc.errors():
-        field = ".".join(str(loc) for loc in err.get("loc", []) if loc != "body")
-        details.append({
-            "field": field,
-            "message": err.get("msg", ""),
-            "type": err.get("type", ""),
-        })
+    details = [_build_validation_detail(err) for err in exc.errors()]
+    first = details[0] if details else {}
     return JSONResponse(
         status_code=422,
         content={
@@ -446,6 +505,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "retry_after_seconds": None,
+            "retryable": False,
+            "param": first.get("param") or None,
+            "suggestion": first.get("suggestion"),
+            "valid_values": first.get("valid_values"),
             "details": details,
         },
         headers={"X-Request-ID": request_id or ""},
@@ -464,6 +527,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "retry_after_seconds": None,
+            "retryable": False,
+            "param": None,
+            "suggestion": None,
+            "valid_values": None,
+            "details": [],
         },
         headers={"X-Request-ID": request_id or "", "Retry-After": "5"},
     )
