@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from config import MAX_QUEUE_PAYLOAD_SIZE
 from db import get_db, DB_BACKEND
 from helpers import get_agent_id, _encrypt, _decrypt, _track_event, _fire_webhooks, _queue_agent_event
-from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest, QueueCompleteRequest
+from models import QueueSubmitRequest, QueueJobResponse, QueueListResponse, QueueFailRequest, QueueCompleteRequest, QueueBatchRequest, QueueBatchResponse, QueueBatchResultItem
 
 from rate_limit import limiter, make_tier_limit
 
@@ -28,6 +28,36 @@ def queue_submit(request: Request, req: QueueSubmitRequest, agent_id: str = Depe
         db.execute("INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at, max_attempts, retry_delay_seconds) VALUES (?,?,?,?,?,?,?,?)", (job_id, agent_id, req.queue_name, _encrypt(payload_str), req.priority, now, req.max_attempts, req.retry_delay_seconds))
     if is_first: _track_event("agent.first_job", agent_id=agent_id)
     return {"job_id": job_id, "status": "pending", "queue_name": req.queue_name, "max_attempts": req.max_attempts}
+
+
+@router.post("/v1/queue/batch", tags=["Queue"], response_model=QueueBatchResponse)
+@limiter.limit(make_tier_limit("agent_write"))
+def queue_batch(request: Request, req: QueueBatchRequest, agent_id: str = Depends(get_agent_id)):
+    results = []
+    succeeded = 0
+    failed = 0
+
+    with get_db() as db:
+        for item in req.items:
+            try:
+                job_id = f"job_{uuid.uuid4().hex[:16]}"
+                now = datetime.now(timezone.utc).isoformat()
+                payload_str = json.dumps(item.payload) if isinstance(item.payload, dict) else item.payload
+                if len(payload_str.encode("utf-8")) > MAX_QUEUE_PAYLOAD_SIZE:
+                    raise ValueError(f"Payload exceeds maximum size of {MAX_QUEUE_PAYLOAD_SIZE} bytes")
+                db.execute(
+                    "INSERT INTO queue (job_id, agent_id, queue_name, payload, priority, created_at, max_attempts, retry_delay_seconds) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (job_id, agent_id, item.queue_name, _encrypt(payload_str), item.priority, now, item.max_attempts, item.retry_delay_seconds)
+                )
+                results.append(QueueBatchResultItem(job_id=job_id, success=True, status="pending", queue_name=item.queue_name))
+                succeeded += 1
+            except Exception as e:
+                results.append(QueueBatchResultItem(success=False, status="error", error=str(e)))
+                failed += 1
+
+    return QueueBatchResponse(results=results, total=len(req.items), succeeded=succeeded, failed=failed)
+
 
 @router.get("/v1/queue/dead_letter", tags=["Queue"])
 @limiter.limit(make_tier_limit("agent_read"))
