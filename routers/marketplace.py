@@ -161,10 +161,12 @@ def marketplace_claim(request: Request, task_id: str, agent_id: str = Depends(ge
             raise HTTPException(409, f"Task is not open (status: {task['status']})")
         if task["creator_agent"] == agent_id:
             raise HTTPException(400, "Cannot claim your own task")
-        db.execute(
+        result = db.execute(
             "UPDATE marketplace SET status='claimed', claimed_by=?, claimed_at=? WHERE task_id=? AND status='open'",
             (agent_id, now, task_id)
         )
+        if result.rowcount == 0:
+            raise HTTPException(409, "Task already claimed or not available")
     _fire_webhooks(task["creator_agent"], "marketplace.task.claimed", {
         "task_id": task_id, "claimed_by": agent_id, "title": task["title"],
     })
