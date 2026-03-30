@@ -147,6 +147,39 @@ async def _custom_rate_limit_handler(request: Request, exc: RateLimitExceeded):
 
 app.add_exception_handler(RateLimitExceeded, _custom_rate_limit_handler)
 
+import re as _re
+
+_ENDPOINT_CATEGORY_MAP = [
+    (_re.compile(r"^/v1/auth/signup$"), "auth_signup"),
+    (_re.compile(r"^/v1/register$"), "auth_signup"),
+    (_re.compile(r"^/v1/auth/login$"), "auth_login"),
+    (_re.compile(r"^/v1/auth/forgot"), "auth_forgot"),
+    (_re.compile(r"^/v1/auth/2fa.*reset"), "auth_2fa_reset"),
+    (_re.compile(r"^/admin/"), "admin"),
+    (_re.compile(r"^/v1/billing"), "billing"),
+    (_re.compile(r"^/v1/user"), "admin"),       # dashboard endpoints use admin category
+    (_re.compile(r"^/v1/orgs"), "admin"),        # dashboard endpoints use admin category
+    (_re.compile(r"^/dashboard/"), "admin"),      # dashboard endpoints use admin category
+]
+
+
+@app.middleware("http")
+async def set_endpoint_category(request: Request, call_next):
+    """Set request.state.endpoint_category for tier-aware rate limiting and 429 responses."""
+    category = "agent_read"  # default for GET
+    path = request.url.path
+    for pattern, cat in _ENDPOINT_CATEGORY_MAP:
+        if pattern.search(path):
+            category = cat
+            break
+    else:
+        # Agent endpoints: read vs write
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            category = "agent_write"
+    request.state.endpoint_category = category
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def add_middleware(request: Request, call_next):
     start = time.monotonic()

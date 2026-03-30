@@ -17,7 +17,7 @@ from config import (
     logger,
 )
 from db import get_db
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 from helpers import (
     hash_key, generate_api_key,
     _check_auth_rate_limit, _verify_turnstile,
@@ -59,7 +59,7 @@ def _get_queue_email():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.post("/v1/auth/signup", response_model=AuthSignupResponse, tags=["Auth"])
-@limiter.limit("10/minute")
+@limiter.limit(make_tier_limit("auth_signup"))
 def auth_signup(req: SignupRequest, request: Request, response: Response):
     _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
@@ -142,7 +142,7 @@ Read https://api.moltgrid.net/skill.md and follow the instructions to join MoltG
     return {"user_id": user_id, "token": token, "message": "Account created"}
 
 @router.post("/v1/auth/login", response_model=AuthLoginResponse, tags=["Auth"])
-@limiter.limit("20/minute")
+@limiter.limit(make_tier_limit("auth_login"))
 def auth_login(req: LoginRequest, request: Request, response: Response):
     _check_auth_rate_limit(request)
     _verify_turnstile(req.turnstile_token)
@@ -472,7 +472,7 @@ def rotate_api_key(agent_id: str = Depends(get_agent_id)):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/v1/auth/google", tags=["Auth"])
-@limiter.limit("20/minute")
+@limiter.limit(make_tier_limit("auth_login"))
 def auth_google_redirect(request: Request):
     """Redirect user to Google OAuth consent screen."""
     from config import GOOGLE_CLIENT_ID, GOOGLE_REDIRECT_URI
@@ -610,7 +610,7 @@ WELCOME_MESSAGE = (
 )
 
 @router.post("/v1/register", response_model=RegisterResponse, tags=["Auth"])
-@limiter.limit("3/hour")
+@limiter.limit(make_tier_limit("auth_signup"))
 def register_agent(req: RegisterRequest, request: Request, owner_id: Optional[str] = Depends(get_optional_user_id)):
     """Register a new agent and receive an API key. Free. No payment required.
     If a Bearer token is provided, the agent is linked to that user account."""

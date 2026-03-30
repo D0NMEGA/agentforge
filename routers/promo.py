@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from config import TIER_LIMITS, logger
 from db import get_db
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 from helpers import get_user_id, _track_event, _log_audit, _get_client_ip
 
 router = APIRouter()
@@ -79,7 +79,7 @@ def _get_promo_stats(db) -> dict:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/v1/promo/status", tags=["Promo"], response_model=PromoStatusResponse)
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("agent_read"))
 def promo_status(request: Request):
     """Check how many Scale spots remain. No auth required."""
     with get_db() as db:
@@ -87,7 +87,7 @@ def promo_status(request: Request):
 
 
 @router.post("/v1/promo/generate", tags=["Promo"], response_model=GenerateCodeResponse)
-@limiter.limit("3/hour")
+@limiter.limit(make_tier_limit("auth_signup"))
 def generate_promo_code(request: Request):
     """Generate a single-use promo code. Rate-limited by IP to prevent farming.
 
@@ -147,7 +147,7 @@ def generate_promo_code(request: Request):
 
 
 @router.post("/v1/promo/redeem", tags=["Promo"], response_model=RedeemCodeResponse)
-@limiter.limit("10/minute")
+@limiter.limit(make_tier_limit("agent_write"))
 def redeem_promo_code(request: Request, req: RedeemCodeRequest, user_id: str = Depends(get_user_id)):
     """Redeem a promo code. Requires authentication.
 

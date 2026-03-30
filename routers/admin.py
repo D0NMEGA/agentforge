@@ -22,7 +22,7 @@ from helpers import (
 from pydantic import BaseModel
 from models import AdminLoginRequest, AdminEmailRequest
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 import time as _time
 
 # Progressive lockout: 5 failures per IP -> 429 for 15 minutes
@@ -100,7 +100,7 @@ def _verify_admin_session(admin_token: str = Cookie(None)) -> bool:
     return True
 
 @router.post("/admin/api/login", tags=["Admin"])
-@limiter.limit("5/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     """Authenticate admin and set session cookie."""
     _check_auth_rate_limit(request)
@@ -134,7 +134,7 @@ def admin_login(req: AdminLoginRequest, request: Request, response: Response):
     return {"status": "authenticated"}
 
 @router.post("/admin/api/logout", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_logout(request: Request, response: Response, admin_token: str = Cookie(None)):
     """Log out admin session."""
     if admin_token:
@@ -144,7 +144,7 @@ def admin_logout(request: Request, response: Response, admin_token: str = Cookie
     return {"status": "logged_out"}
 
 @router.get("/admin/api/dashboard", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_dashboard(request: Request, _: bool = Depends(_verify_admin_session)):
     """Admin dashboard data: full system overview."""
     with get_db() as db:
@@ -199,7 +199,7 @@ def admin_dashboard(request: Request, _: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/messages", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_messages(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -227,7 +227,7 @@ def admin_messages(request: Request,
     return {"messages": messages, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/webhook-deliveries", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_webhook_deliveries(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -263,7 +263,7 @@ def admin_webhook_deliveries(request: Request,
     return {"deliveries": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/analytics", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_analytics(request: Request, _: bool = Depends(_verify_admin_session)):
     """Analytics dashboard: funnel metrics, signups, conversions, churn, MRR."""
     now = datetime.now(timezone.utc)
@@ -318,7 +318,7 @@ def admin_analytics(request: Request, _: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/memory", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_memory(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -344,7 +344,7 @@ def admin_memory(request: Request,
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/queue", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_queue(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -376,7 +376,7 @@ def admin_queue(request: Request,
     return {"jobs": jobs, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/webhooks", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_webhooks(request: Request, _: bool = Depends(_verify_admin_session)):
     """Browse all registered webhooks."""
     with get_db() as db:
@@ -384,7 +384,7 @@ def admin_webhooks(request: Request, _: bool = Depends(_verify_admin_session)):
     return {"webhooks": [{**dict(r), "event_types": json.loads(r["event_types"])} for r in rows], "total": len(rows)}
 
 @router.get("/admin/api/schedules", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_schedules(request: Request, _: bool = Depends(_verify_admin_session)):
     """Browse all scheduled tasks."""
     with get_db() as db:
@@ -395,7 +395,7 @@ def admin_schedules(request: Request, _: bool = Depends(_verify_admin_session)):
     return {"schedules": schedules, "total": len(schedules)}
 
 @router.get("/admin/api/shared-memory", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_shared_memory(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -421,7 +421,7 @@ def admin_shared_memory(request: Request,
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/sla", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_sla(request: Request, _: bool = Depends(_verify_admin_session)):
     """Detailed SLA and uptime data for admin dashboard."""
     with get_db() as db:
@@ -448,7 +448,7 @@ def admin_sla(request: Request, _: bool = Depends(_verify_admin_session)):
     }
 
 @router.get("/admin/api/agents/{agent_id}", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_agent_detail(request: Request, agent_id: str, _: bool = Depends(_verify_admin_session)):
     """Get full detail for a single agent including all their data."""
     with get_db() as db:
@@ -516,7 +516,7 @@ def admin_agent_detail(request: Request, agent_id: str, _: bool = Depends(_verif
     }
 
 @router.delete("/admin/api/agents/{agent_id}", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_delete_agent(request: Request, agent_id: str, _: bool = Depends(_verify_admin_session)):
     """Delete an agent and all associated data."""
     with get_db() as db:
@@ -538,7 +538,7 @@ def admin_delete_agent(request: Request, agent_id: str, _: bool = Depends(_verif
     return {"status": "deleted", "agent_id": agent_id}
 
 @router.get("/admin/api/collaborations", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_collaborations(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -563,7 +563,7 @@ def admin_collaborations(request: Request,
     return {"collaborations": collabs, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/marketplace", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_marketplace(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -581,7 +581,7 @@ def admin_marketplace(request: Request,
     return {"tasks": [_parse_marketplace_row(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/scenarios", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_scenarios(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -602,7 +602,7 @@ def admin_scenarios(request: Request,
     return {"scenarios": scenarios, "total": total, "limit": limit, "offset": offset}
 
 @router.get("/admin/api/contact", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_contact(request: Request, 
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -615,7 +615,7 @@ def admin_contact(request: Request,
     return {"submissions": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 @router.post("/admin/api/email", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_email(request: Request, req: AdminEmailRequest, _: bool = Depends(_verify_admin_session)):
     """Preview or send a branded email from the admin panel."""
     from helpers import _branded_email, _queue_email, _email_from
@@ -629,7 +629,7 @@ def admin_email(request: Request, req: AdminEmailRequest, _: bool = Depends(_ver
     return {"status": "preview", "preview": rendered, "from": _email_from(req.from_category)}
 
 @router.get("/admin/api/emails", tags=["Admin"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def admin_email_history(request: Request, _: bool = Depends(_verify_admin_session)):
     """List recent emails from the queue."""
     with get_db() as db:

@@ -16,12 +16,12 @@ from models import (
     OrgRoleChangeResponse, OrgSwitchResponse,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
 @router.post("/v1/orgs", response_model=OrgCreateResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def create_org(request: Request, req: OrgCreateRequest, user_id: str = Depends(get_user_id)):
     org_id = f"org_{uuid.uuid4().hex[:12]}"
     now = datetime.now(timezone.utc).isoformat()
@@ -45,7 +45,7 @@ def create_org(request: Request, req: OrgCreateRequest, user_id: str = Depends(g
 
 
 @router.get("/v1/orgs", response_model=OrgListResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def list_orgs(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         rows = db.execute(
@@ -59,7 +59,7 @@ def list_orgs(request: Request, user_id: str = Depends(get_user_id)):
 
 
 @router.get("/v1/orgs/{org_id}", response_model=OrgDetailResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def get_org(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
@@ -85,7 +85,7 @@ def get_org(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/orgs/{org_id}/members", response_model=OrgInviteResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def invite_member(request: Request, org_id: str, req: OrgInviteRequest, user_id: str = Depends(get_user_id)):
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -118,7 +118,7 @@ def invite_member(request: Request, org_id: str, req: OrgInviteRequest, user_id:
 
 
 @router.get("/v1/orgs/{org_id}/members", response_model=OrgMembersResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def list_org_members(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute("SELECT org_id FROM organizations WHERE org_id = ?", (org_id,)).fetchone()
@@ -138,7 +138,7 @@ def list_org_members(request: Request, org_id: str, user_id: str = Depends(get_u
 
 
 @router.delete("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRemoveResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def remove_member(request: Request, org_id: str, target_user_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         org = db.execute(
@@ -163,7 +163,7 @@ def remove_member(request: Request, org_id: str, target_user_id: str, user_id: s
 
 
 @router.patch("/v1/orgs/{org_id}/members/{target_user_id}", response_model=OrgRoleChangeResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def change_member_role(request: Request, 
     org_id: str,
     target_user_id: str,
@@ -193,7 +193,7 @@ def change_member_role(request: Request,
 
 
 @router.post("/v1/orgs/{org_id}/switch", response_model=OrgSwitchResponse, tags=["Orgs"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def switch_org_context(request: Request, org_id: str, user_id: str = Depends(get_user_id)):
     """Switch the user's active org context."""
     with get_db() as db:

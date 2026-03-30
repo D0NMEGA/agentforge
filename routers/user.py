@@ -19,7 +19,7 @@ from helpers import (
     _queue_email, _branded_email, hash_key,
 )
 
-from rate_limit import limiter
+from rate_limit import limiter, make_tier_limit
 
 router = APIRouter()
 
@@ -56,7 +56,7 @@ class DeleteAccountRequest(BaseModel):
 
 # ── Profile ───────────────────────────────────────────────────────────
 @router.get("/v1/user/profile", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def get_profile(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         user = db.execute(
@@ -70,7 +70,7 @@ def get_profile(request: Request, user_id: str = Depends(get_user_id)):
 
 
 @router.patch("/v1/user/profile", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def update_profile(request: Request, req: ProfileUpdate, user_id: str = Depends(get_user_id)):
     VALID_TIMEZONES = [
         "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
@@ -132,7 +132,7 @@ def update_profile(request: Request, req: ProfileUpdate, user_id: str = Depends(
 
 # ── Password ──────────────────────────────────────────────────────────
 @router.post("/v1/auth/change-password", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def change_password(request: Request, req: ChangePasswordRequest, user_id: str = Depends(get_user_id)):
     if req.new_password != req.confirm_password:
         raise HTTPException(422, "Passwords do not match")
@@ -152,7 +152,7 @@ def change_password(request: Request, req: ChangePasswordRequest, user_id: str =
 
 # ── API Keys ──────────────────────────────────────────────────────────
 @router.get("/v1/user/keys", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def list_keys(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         keys = db.execute(
@@ -164,7 +164,7 @@ def list_keys(request: Request, user_id: str = Depends(get_user_id)):
 
 
 @router.post("/v1/user/keys", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def create_key(request: Request, req: CreateKeyRequest, user_id: str = Depends(get_user_id)):
     prefix = "mg_live_" if req.scope == "live" else "mg_test_"
     raw_key = prefix + secrets.token_hex(32)
@@ -184,7 +184,7 @@ def create_key(request: Request, req: CreateKeyRequest, user_id: str = Depends(g
 
 
 @router.delete("/v1/user/keys/{key_id}", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def revoke_key(request: Request, key_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         key = db.execute("SELECT id FROM user_keys WHERE id = ? AND user_id = ?", (key_id, user_id)).fetchone()
@@ -197,7 +197,7 @@ def revoke_key(request: Request, key_id: str, user_id: str = Depends(get_user_id
 
 # ── Sessions ──────────────────────────────────────────────────────────
 @router.get("/v1/user/sessions", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def list_sessions(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         sessions = db.execute(
@@ -209,7 +209,7 @@ def list_sessions(request: Request, user_id: str = Depends(get_user_id)):
 
 
 @router.delete("/v1/user/sessions/{session_id}", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def revoke_session(request: Request, session_id: str, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         session = db.execute(
@@ -223,7 +223,7 @@ def revoke_session(request: Request, session_id: str, user_id: str = Depends(get
 
 
 @router.post("/v1/user/sessions/revoke-all", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def revoke_all_sessions(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         result = db.execute(
@@ -236,7 +236,7 @@ def revoke_all_sessions(request: Request, user_id: str = Depends(get_user_id)):
 
 # ── Data Export ───────────────────────────────────────────────────────
 @router.post("/v1/user/export", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def export_data(request: Request, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         user = db.execute(
@@ -291,7 +291,7 @@ def export_data(request: Request, user_id: str = Depends(get_user_id)):
 
 # ── Account Deletion ─────────────────────────────────────────────────
 @router.delete("/v1/user/account", tags=["User Settings"])
-@limiter.limit("60/minute")
+@limiter.limit(make_tier_limit("admin"))
 def delete_account(request: Request, req: DeleteAccountRequest, user_id: str = Depends(get_user_id)):
     with get_db() as db:
         user = db.execute("SELECT email FROM users WHERE user_id = ?", (user_id,)).fetchone()
