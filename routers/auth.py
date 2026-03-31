@@ -636,6 +636,18 @@ def register_agent(req: RegisterRequest, request: Request, owner_id: Optional[st
         if existing:
             raise HTTPException(409, f"An agent with name '{req.name}' already exists. Choose a different name.")
 
+        # If no owner_id from Bearer/cookie, try resolving from X-API-Key header
+        # so agents can register siblings under the same account
+        if not owner_id:
+            caller_key = request.headers.get("x-api-key")
+            if caller_key:
+                caller_row = db.execute(
+                    "SELECT owner_id FROM agents WHERE api_key_hash = ?",
+                    (hash_key(caller_key.strip()),)
+                ).fetchone()
+                if caller_row and caller_row["owner_id"]:
+                    owner_id = caller_row["owner_id"]
+
         # Enforce max_agents limit if user is authenticated
         if owner_id:
             user = db.execute("SELECT max_agents FROM users WHERE user_id = ?", (owner_id,)).fetchone()

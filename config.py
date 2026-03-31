@@ -37,13 +37,14 @@ TIER_ENDPOINT_LIMITS = {
 TIER_MULTIPLIERS = {"free": 1, "hobby": 2.5, "team": 5, "scale": 10}
 FIXED_CATEGORIES = {"admin", "billing"}  # Only admin and billing are fixed
 
-# auth_signup has explicit per-tier limits from RATE-01 that do NOT follow TIER_MULTIPLIERS
-# RATE-01: free=3/hr, hobby=10/hr, team=50/hr, scale=200/hr
+# auth_signup rate limits -- generous for authenticated users since max_agents
+# enforcement is the real guard. Unauthenticated (free fallback) gets a tighter
+# IP-based limit to prevent orphan-agent spam.
 TIER_AUTH_SIGNUP_LIMITS = {
-    "free": "3/hour",
-    "hobby": "10/hour",
-    "team": "50/hour",
-    "scale": "200/hour",
+    "free": "10/hour",
+    "hobby": "30/hour",
+    "team": "100/hour",
+    "scale": "500/hour",
 }
 
 # Subscription tier limits

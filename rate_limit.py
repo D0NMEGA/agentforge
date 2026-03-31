@@ -38,14 +38,15 @@ def _get_key_func(request):
 
     - Agent API key endpoints: key by tier + API key hash
     - JWT user endpoints: key by tier + Authorization header hash
-    - Unauthenticated: key by tier (free) + IP address
+    - Unauthenticated: key by tier + IP address (tier looked up from mg_token cookie)
     """
     tier = "free"
 
     # Try X-API-Key first (agent endpoints)
     api_key = request.headers.get("x-api-key")
     if api_key:
-        ident = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        api_key_stripped = api_key.strip()
+        ident = hashlib.sha256(api_key_stripped.encode()).hexdigest()[:16]
         # Look up tier from DB
         try:
             from db import get_db
@@ -54,12 +55,12 @@ def _get_key_func(request):
                     "SELECT u.subscription_tier FROM users u "
                     "JOIN agents a ON a.owner_id = u.user_id "
                     "WHERE a.api_key_hash = ?",
-                    (hashlib.sha256(api_key.strip().encode()).hexdigest(),)
+                    (hashlib.sha256(api_key_stripped.encode()).hexdigest(),)
                 ).fetchone()
                 if row:
                     tier = row["subscription_tier"] or "free"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Rate limit tier lookup failed for X-API-Key: %s", e)
         request.state.subscription_tier = tier
         return f"{tier}:{ident}"
 
@@ -74,14 +75,26 @@ def _get_key_func(request):
             token = auth_header[len("Bearer "):]
             payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             tier = payload.get("subscription_tier", "free") or "free"
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Rate limit tier lookup failed for Bearer token: %s", e)
         request.state.subscription_tier = tier
         return f"{tier}:{ident}"
 
-    # Fallback: IP address (unauthenticated = free tier)
+    # Fallback: IP address -- check mg_token cookie for tier (covers /v1/register
+    # called from a browser session where the user is logged in but not sending
+    # a Bearer header explicitly)
+    ip = get_remote_address(request)
+    mg_token = request.cookies.get("mg_token")
+    if mg_token:
+        try:
+            import jwt as pyjwt
+            from config import JWT_SECRET, JWT_ALGORITHM
+            payload = pyjwt.decode(mg_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            tier = payload.get("subscription_tier", "free") or "free"
+        except Exception:
+            pass
     request.state.subscription_tier = tier
-    return f"{tier}:{get_remote_address(request)}"
+    return f"{tier}:{ip}"
 
 
 def make_tier_limit(endpoint_category: str):
