@@ -7096,15 +7096,15 @@ class TestRateLimitUnification:
     def test_tier_scaling_auth_signup_explicit_limits(self):
         """RATE-01: auth_signup uses TIER_AUTH_SIGNUP_LIMITS (explicit, NOT multipliers).
 
-        Per RATE-01 requirement: free=3/hr, hobby=10/hr, team=50/hr, scale=200/hr.
-        These do NOT follow TIER_MULTIPLIERS (which would give 3/7/15/30).
+        Per config: free=10/hr, hobby=30/hr, team=100/hr, scale=500/hr.
+        These do NOT follow TIER_MULTIPLIERS.
         """
         from rate_limit import make_tier_limit
         fn = make_tier_limit("auth_signup")
-        assert fn("free:abc") == "3/hour"
-        assert fn("hobby:abc") == "10/hour"   # Explicit, NOT int(3 * 2.5) = 7
-        assert fn("team:abc") == "50/hour"    # Explicit, NOT int(3 * 5) = 15
-        assert fn("scale:abc") == "200/hour"  # Explicit, NOT int(3 * 10) = 30
+        assert fn("free:abc") == "10/hour"
+        assert fn("hobby:abc") == "30/hour"
+        assert fn("team:abc") == "100/hour"
+        assert fn("scale:abc") == "500/hour"
 
     def test_fixed_categories_not_scaled(self):
         """RATE-02: admin and billing are fixed regardless of tier.
@@ -7125,13 +7125,13 @@ class TestRateLimitUnification:
         assert "dashboard" not in TIER_ENDPOINT_LIMITS
 
     def test_auth_signup_limits_match_rate01(self):
-        """TIER_AUTH_SIGNUP_LIMITS must match RATE-01 requirement values exactly."""
+        """TIER_AUTH_SIGNUP_LIMITS must match config values exactly."""
         from config import TIER_AUTH_SIGNUP_LIMITS
         assert TIER_AUTH_SIGNUP_LIMITS == {
-            "free": "3/hour",
-            "hobby": "10/hour",
-            "team": "50/hour",
-            "scale": "200/hour",
+            "free": "10/hour",
+            "hobby": "30/hour",
+            "team": "100/hour",
+            "scale": "500/hour",
         }
 
     def test_no_dual_enforcement_in_get_agent_id(self):
