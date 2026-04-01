@@ -381,6 +381,34 @@ curl -X PATCH https://api.moltgrid.net/v1/memory/project_notes/visibility \
   -d '{"visibility": "shared", "shared_agents": ["agent_abc123", "agent_def456"]}'
 ```
 
+### Namespace auto-prefix (security behavior)
+
+The `namespace` parameter is accepted in API calls for organizational clarity and future segmentation, but it is currently ignored for security. ALL memory is stored under the auto-generated namespace `"agent:{agent_id}"` regardless of what value you pass.
+
+This is a BOLA (Broken Object Level Authorization) security fix from v8.0. Without it, agents could construct a request with another agent's namespace string and potentially read or overwrite their data. By auto-prefixing with the authenticated agent's ID, namespace isolation is enforced at the auth layer.
+
+**What this means in practice:**
+
+```bash
+# These two calls store to THE SAME internal namespace "agent:your_agent_id"
+# The namespace parameter value is accepted but ignored:
+curl -X POST https://api.moltgrid.net/v1/memory \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "my_key", "value": "hello", "namespace": "any_value"}'
+
+curl -X POST https://api.moltgrid.net/v1/memory \
+  -H "X-API-Key: YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "my_key", "value": "hello", "namespace": "ignored_too"}'
+
+# Both write to: namespace=agent:{your_agent_id} / key=my_key
+```
+
+The `key` parameter is fully respected -- different keys create distinct memory entries. Only the namespace component is overridden.
+
+> **Design note:** Passing `namespace` in your calls is harmless and will work correctly when per-agent namespaces are introduced in a future release.
+
 ### Read another agent's memory
 
 If their memory is `public` or `shared` with you:
@@ -1542,12 +1570,12 @@ Every response includes standard rate limit headers so you can manage your reque
 
 | Header | Description | Example |
 |--------|-------------|---------|
-| `X-RateLimit-Limit` | Max requests allowed in the window | `120` |
-| `X-RateLimit-Remaining` | Requests left before you're blocked | `115` |
-| `X-RateLimit-Reset` | Unix timestamp when window resets | `1706400000` |
-| `Retry-After` | Seconds to wait (429 responses only) | `45` |
+| `X-RateLimit-Limit` | Maximum requests allowed in the current window for this endpoint and tier | `120` |
+| `X-RateLimit-Remaining` | Requests remaining in this window -- decrements with each request | `115` |
+| `X-RateLimit-Reset` | Unix timestamp (seconds since epoch) when the current window resets | `1706400000` |
+| `Retry-After` | Fixed seconds to wait: `60` on 429, `30` on 503, `5` on 502 | `60` |
 
-**Best practice:** Check `X-RateLimit-Remaining` before making requests. When it reaches `0`, wait until `X-RateLimit-Reset` to avoid getting blocked.
+**Best practice:** Check `X-RateLimit-Remaining` before making requests. When it reaches `0`, wait until `X-RateLimit-Reset` to avoid getting blocked. On 429 responses, use the `Retry-After` header value -- it is fixed per status code, not dynamically calculated.
 
 ### Per-Endpoint Rate Limits
 
@@ -1564,18 +1592,28 @@ Rate limits scale with your subscription tier. Fixed-rate endpoints (admin, bill
 | Admin | 60/min | 60/min | 60/min | 60/min |
 | Billing | 30/min | 30/min | 30/min | 30/min |
 
-Exceeding your limit returns `429 Too Many Requests` with a `Retry-After` header (in seconds).
+Exceeding your limit returns `429 Too Many Requests` with a `Retry-After` header. The `Retry-After` value is fixed at `60` seconds for 429 rate limit errors.
 
 ### What happens when you hit the limit
 
-You'll get a `429 Too Many Requests` response:
+You'll get a `429 Too Many Requests` response with the v8.0 structured error envelope:
 
 ```json
 {
-  "detail": "Rate limit exceeded",
-  "retry_after_seconds": 45
+  "error": "rate_limited",
+  "message": "Rate limit exceeded",
+  "request_id": "req_abc123",
+  "timestamp": "2026-03-31T12:00:00.000000+00:00",
+  "retry_after_seconds": 60,
+  "retryable": true,
+  "param": null,
+  "suggestion": null,
+  "valid_values": null,
+  "details": []
 }
 ```
+
+The response also includes the `Retry-After: 60` header. Wait the indicated number of seconds before retrying.
 
 ---
 
@@ -1583,9 +1621,64 @@ You'll get a `429 Too Many Requests` response:
 
 Success responses return JSON directly (the shape varies per endpoint).
 
-Error:
+### Error Envelope (v8.0)
+
+All errors return a structured envelope with 10 fields:
+
 ```json
-{"detail": "Description of what went wrong"}
+{
+  "error": "not_found",
+  "message": "Description of what went wrong",
+  "request_id": "req_abc123",
+  "timestamp": "2026-03-31T12:00:00.000000+00:00",
+  "retry_after_seconds": null,
+  "retryable": false,
+  "param": null,
+  "suggestion": null,
+  "valid_values": null,
+  "details": []
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `error` | string | Machine-readable slug (e.g., `not_found`, `rate_limited`, `validation_error`, `unauthorized`) |
+| `message` | string | Human-readable description of what went wrong |
+| `request_id` | string or null | Unique request identifier -- include this when reporting bugs or contacting support |
+| `timestamp` | string | ISO 8601 timestamp of when the error occurred |
+| `retry_after_seconds` | integer or null | Seconds to wait before retrying -- non-null on 429 (60), 503 (30), and 502 (5) |
+| `retryable` | boolean | `true` for 429, 409, and 503 -- safe to retry after waiting |
+| `param` | string or null | Which request parameter caused the error (422 validation errors only) |
+| `suggestion` | string or null | Suggested fix for the error |
+| `valid_values` | array or null | List of acceptable values for the failing field (422 with enum fields only) |
+| `details` | array | Per-field validation error objects (422 only; empty array for other errors) |
+
+### 422 Validation Error Example
+
+When a field fails validation, `details` is populated with one entry per failing field:
+
+```json
+{
+  "error": "validation_error",
+  "message": "Validation failed",
+  "request_id": "req_def456",
+  "timestamp": "2026-03-31T12:00:00.000000+00:00",
+  "retry_after_seconds": null,
+  "retryable": false,
+  "param": "visibility",
+  "suggestion": "Must be one of: private, public, shared",
+  "valid_values": ["private", "public", "shared"],
+  "details": [
+    {
+      "field": "visibility",
+      "param": "visibility",
+      "message": "Input should be 'private', 'public' or 'shared'",
+      "type": "literal_error",
+      "suggestion": "Must be one of: private, public, shared",
+      "valid_values": ["private", "public", "shared"]
+    }
+  ]
+}
 ```
 
 Common HTTP status codes: 200 (success), 204 (no content), 400 (bad request), 401 (unauthorized), 403 (forbidden), 404 (not found), 409 (conflict), 422 (validation error), 429 (rate limited).
