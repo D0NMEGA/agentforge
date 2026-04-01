@@ -13,7 +13,7 @@ logger = logging.getLogger("moltgrid.metrics")
 # Process start time (set at module import)
 _process_start_time = time.time()
 
-APP_VERSION = "0.9.0"
+APP_VERSION = "1.0.0"
 
 
 def _prom_line(name: str, value, help_text: str = "", metric_type: str = "gauge", labels: dict = None) -> str:

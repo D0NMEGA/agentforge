@@ -187,7 +187,7 @@ class TestMetricsEndpoint:
     def test_metrics_version_label(self):
         """moltgrid_info should include version label."""
         resp = self.client.get("/metrics")
-        assert 'version="0.9.0"' in resp.text
+        assert 'version="1.0.0"' in resp.text
 
     def test_metrics_cached(self):
         """Second call should return cached result (same content)."""

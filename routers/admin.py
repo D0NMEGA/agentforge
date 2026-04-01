@@ -193,7 +193,7 @@ def admin_dashboard(request: Request, _: bool = Depends(_verify_admin_session)):
             "test_scenarios": scenario_count,
             "contact_submissions": contact_count,
         },
-        "version": "0.9.0",
+        "version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "encryption_enabled": _fernet is not None,
     }

@@ -217,7 +217,7 @@ async def health(request: Request):
         logger.error(f"Health check: DB unreachable: {db_err}")
         minimal_503 = {
             "status": "unavailable",
-            "version": "0.9.0",
+            "version": "1.0.0",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "retry_after_seconds": 30,
         }
@@ -238,7 +238,7 @@ async def health(request: Request):
     if not is_authenticated:
         return {
             "status": "operational",
-            "version": "0.9.0",
+            "version": "1.0.0",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -280,7 +280,7 @@ async def health(request: Request):
 
     result = {
         "status": "operational",
-        "version": "0.9.0",
+        "version": "1.0.0",
         "stats": {
             "registered_agents": agent_count,
             "public_agents": public_agents,
@@ -355,7 +355,7 @@ async def stats(request: Request):
         messages = (await async_db_fetchone("SELECT COUNT(*) as c FROM relay"))["c"]
         marketplace_tasks = (await async_db_fetchone("SELECT COUNT(*) as c FROM marketplace"))["c"]
         platform_stats = {
-            "platform": "MoltGrid", "version": "0.9.0",
+            "platform": "MoltGrid", "version": "1.0.0",
             "registered_agents": agents, "online_agents": online,
             "total_memory_keys": memory_keys, "total_jobs": total_jobs,
             "total_messages": messages, "total_marketplace_tasks": marketplace_tasks,
@@ -598,7 +598,7 @@ async def prometheus_metrics_v1(request: Request):
 def root(request: Request):
     return {
         "service": "MoltGrid",
-        "version": "0.9.0",
+        "version": "1.0.0",
         "docs": "/docs",
         "description": "Open-source toolkit API for autonomous agents",
         "endpoints": {
