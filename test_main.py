@@ -1370,7 +1370,7 @@ class TestHealthAndStats:
         r = client.get("/")
         assert r.status_code == 200
         d = r.json()
-        assert d["version"] == "0.9.0"
+        assert d["version"] == "1.0.0"
         assert "webhooks" in d["endpoints"]
         assert "schedules" in d["endpoints"]
         assert "shared_memory" in d["endpoints"]
@@ -2592,7 +2592,7 @@ class TestResponseHeaders:
 
     def test_version_header(self):
         r = client.get("/v1/health")
-        assert r.headers["x-moltgrid-version"] == "0.9.0"
+        assert r.headers["x-moltgrid-version"] == "1.0.0"
 
     def test_rate_limit_headers_on_authenticated(self):
         _, _, h = register_agent()
