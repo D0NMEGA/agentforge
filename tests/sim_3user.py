@@ -815,40 +815,332 @@ async def run_obstacle_course(
     return completed
 
 # ===========================================================================
+# USER PERSONA WORKFLOWS
+# ===========================================================================
+
+async def run_user_a(client: httpx.AsyncClient) -> None:
+    """User A: Scale tier, 8 agents, research pipeline."""
+    log("UserA", "Starting research pipeline simulation")
+    agents_a = [n for n, d in S.registered_agents.items() if d["user"] == "UserA"]
+
+    t0 = time.monotonic()
+
+    # Run obstacle courses for all 8 agents concurrently
+    tasks = [run_obstacle_course(client, name, BUDGET_SCALE, "UserA") for name in agents_a]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Agent 01 (Coordinator): relay messages to agents 02-04
+    coord = agents_a[0]
+    for target in agents_a[1:4]:
+        target_id = S.registered_agents[target]["id"]
+        await call(client, "POST", "/v1/relay/send", coord,
+                   json_body={"recipient_id": target_id,
+                              "content": f"Research task assignment from {coord}"},
+                   budget=BUDGET_SCALE)
+
+    # Agents 02-04 (Data ingestion): vector upsert batch
+    for agent in agents_a[1:4]:
+        for i in range(5):
+            await call(client, "POST", "/v1/vector/upsert", agent,
+                       json_body={"key": f"research_data_{i}",
+                                  "text": f"Research finding #{i}: data point for analysis",
+                                  "namespace": "research"},
+                       budget=BUDGET_SCALE)
+
+    # Agents 05-06 (Analysis): vector search + tiered recall
+    for agent in agents_a[4:6]:
+        await call(client, "POST", "/v1/vector/search", agent,
+                   json_body={"query": "research findings analysis",
+                              "namespace": "research", "limit": 5},
+                   budget=BUDGET_SCALE)
+        await call(client, "POST", "/v1/memory/recall", agent,
+                   json_body={"query": "research", "namespace": "obstacle_course"},
+                   budget=BUDGET_SCALE)
+
+    # Agent 07 (Session manager): create session, add messages, summarize
+    sm = agents_a[6]
+    r = await call(client, "POST", "/v1/sessions", sm,
+                   json_body={"name": "research_session"}, budget=BUDGET_SCALE)
+    if r.status_code == 200:
+        sid = r.json().get("session_id", r.json().get("id", ""))
+        if sid:
+            for msg in ["Starting research analysis", "Found 3 key patterns", "Concluding findings"]:
+                await call(client, "POST", f"/v1/sessions/{sid}/messages", sm,
+                           json_body={"role": "user", "content": msg}, budget=BUDGET_SCALE)
+            await call(client, "POST", f"/v1/sessions/{sid}/summarize", sm, budget=BUDGET_SCALE)
+
+    # Agent 08 (Queue processor): submit and process jobs
+    qp = agents_a[7]
+    for i in range(3):
+        r = await call(client, "POST", "/v1/queue/submit", qp,
+                       json_body={"task_type": "research_analysis", "payload": {"batch": i}},
+                       budget=BUDGET_SCALE)
+        if r.status_code == 200:
+            jid = r.json().get("job_id", r.json().get("id", ""))
+            if jid:
+                await call(client, "POST", "/v1/queue/claim", qp, budget=BUDGET_SCALE)
+                await call(client, "POST", f"/v1/queue/{jid}/complete", qp,
+                           json_body={"result": {"processed": True}}, budget=BUDGET_SCALE)
+
+    elapsed_a = time.monotonic() - t0
+    async with S.lock:
+        S.onboarding_times["UserA"] = elapsed_a
+    oc_pass = all(S.obstacle_completions.get(a, False) for a in agents_a)
+    await record("UserA", "ALL", "research_pipeline_complete", oc_pass,
+                 f"8 agents, {sum(1 for r in results if r is True)}/8 obstacle courses, {elapsed_a:.1f}s")
+    log("UserA", f"Complete: {sum(1 for r in results if r is True)}/8 obstacle courses in {elapsed_a:.1f}s")
+
+
+async def run_user_b(client: httpx.AsyncClient) -> None:
+    """User B: Team tier, 8 agents, DevOps monitoring with 10+ min loop."""
+    log("UserB", "Starting DevOps monitoring simulation")
+    agents_b = [n for n, d in S.registered_agents.items() if d["user"] == "UserB"]
+
+    t0 = time.monotonic()
+
+    # Run obstacle courses for all 8 agents concurrently
+    tasks = [run_obstacle_course(client, name, BUDGET_TEAM, "UserB") for name in agents_b]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # DevOps monitoring loop -- 620 seconds (just over 10 min) (SIM-02)
+    duration = 620 if not QUICK_MODE else 30  # 30s in quick mode
+    log("UserB", f"Starting monitoring loop for {duration}s")
+    loop_start = time.time()
+    iteration = 0
+    while time.time() - loop_start < duration:
+        agent = agents_b[iteration % len(agents_b)]
+        role_idx = iteration % len(agents_b)
+
+        if role_idx == 0:
+            await call(client, "GET", "/v1/health", agent, budget=BUDGET_TEAM)
+            await call(client, "GET", "/v1/sla", agent, budget=BUDGET_TEAM)
+        elif role_idx in (1, 2, 3):
+            await call(client, "POST", "/v1/agents/heartbeat", agent,
+                       json_body={"status": "online",
+                                  "metadata": {"iteration": iteration, "role": "devops"}},
+                       budget=BUDGET_TEAM)
+        elif role_idx in (4, 5):
+            await call(client, "GET", "/v1/events", agent, budget=BUDGET_TEAM)
+        elif role_idx == 6:
+            await call(client, "GET", "/v1/schedules", agent, budget=BUDGET_TEAM)
+        elif role_idx == 7:
+            await call(client, "GET", "/v1/webhooks", agent, budget=BUDGET_TEAM)
+
+        iteration += 1
+        await asyncio.sleep(5)
+
+    loop_duration = time.time() - loop_start
+    async with S.lock:
+        S.monitoring_iterations = iteration
+        S.monitoring_duration = loop_duration
+
+    elapsed_b = time.monotonic() - t0
+    async with S.lock:
+        S.onboarding_times["UserB"] = elapsed_b
+
+    oc_pass = all(S.obstacle_completions.get(a, False) for a in agents_b)
+    monitoring_pass = loop_duration >= 600 or QUICK_MODE
+    await record("UserB", "ALL", "devops_monitoring_complete", oc_pass and monitoring_pass,
+                 f"8 agents, monitoring {loop_duration:.0f}s ({iteration} iterations)")
+    log("UserB", f"Complete: monitoring ran {loop_duration:.0f}s with {iteration} iterations")
+
+
+async def run_user_c(client: httpx.AsyncClient) -> None:
+    """User C: Free tier, 1 agent, onboarding + rate limit test."""
+    log("UserC", "Starting Free tier onboarding simulation")
+    agents_c = [n for n, d in S.registered_agents.items() if d["user"] == "UserC"]
+    agent = agents_c[0]
+
+    # Time onboarding (SIM-06)
+    onboard_elapsed = await time_onboarding(client, "UserC", agent)
+    async with S.lock:
+        S.onboarding_times["UserC"] = onboard_elapsed
+    log(agent, f"Onboarding completed in {onboard_elapsed:.1f}s")
+
+    # Obstacle course (SIM-04)
+    await run_obstacle_course(client, agent, BUDGET_FREE, "UserC")
+
+    # Rate limit test (SIM-03): 65 rapid writes to trigger 429
+    log(agent, "Starting rate limit test (65 rapid writes)")
+    hit_429 = False
+    recovery_ok = False
+    for i in range(65):
+        r = await call(client, "POST", "/v1/memory", agent,
+                       json_body={"key": f"rl_test_{i}", "value": f"rate_limit_data_{i}"},
+                       budget=None, skip_rate_wait=True)
+        if r.status_code == 429:
+            hit_429 = True
+            retry_after = r.headers.get("Retry-After", "60")
+            log(agent, f"429 received at write #{i+1}, Retry-After: {retry_after}")
+            await asyncio.sleep(min(int(retry_after), 30))
+            # Verify recovery
+            r2 = await call(client, "GET", "/v1/memory", agent, budget=BUDGET_FREE)
+            recovery_ok = r2.status_code == 200
+            log(agent, f"Recovery after 429: {'OK' if recovery_ok else 'FAIL'} (status {r2.status_code})")
+            break
+
+    async with S.lock:
+        S.hit_429 = hit_429
+        S.recovery_ok = recovery_ok
+
+    await record("UserC", agent, "rate_limit_graceful",
+                 hit_429 and recovery_ok,
+                 f"hit_429={hit_429}, recovery_ok={recovery_ok}")
+    await record("UserC", agent, "onboarding_time",
+                 onboard_elapsed < 300,
+                 f"{onboard_elapsed:.1f}s (limit 300s)")
+    log("UserC", f"Complete: 429={'hit' if hit_429 else 'missed'}, recovery={'OK' if recovery_ok else 'FAIL'}")
+
+
+# ===========================================================================
+# REPORT GENERATION
+# ===========================================================================
+
+def generate_report() -> str:
+    """Generate markdown simulation report."""
+    lines: list[str] = []
+    lines.append("# 3-User Realistic Simulation Report")
+    lines.append(f"\n**Date:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    lines.append(f"**API:** {API}")
+    lines.append(f"**Mode:** {'Quick' if QUICK_MODE else 'Full'}")
+    lines.append(f"**Duration:** {time.time() - S.start_time:.0f}s")
+    lines.append(f"**Agents registered:** {len(S.registered_agents)}")
+
+    # SIM Requirement Results
+    lines.append("\n## SIM Requirement Results\n")
+    lines.append("| Req | Description | Result |")
+    lines.append("|-----|-------------|--------|")
+
+    # SIM-01: User A research pipeline
+    agents_a = [n for n, d in S.registered_agents.items() if d["user"] == "UserA"]
+    sim01 = all(S.obstacle_completions.get(a, False) for a in agents_a) if agents_a else False
+    lines.append(f"| SIM-01 | User A research pipeline | {'PASS' if sim01 else 'FAIL'} |")
+
+    # SIM-02: User B monitoring 10+ min
+    sim02 = S.monitoring_duration >= 600 or QUICK_MODE
+    lines.append(f"| SIM-02 | User B monitoring {S.monitoring_duration:.0f}s | {'PASS' if sim02 else 'FAIL'} |")
+
+    # SIM-03: User C 429 + recovery
+    sim03 = S.hit_429 and S.recovery_ok
+    lines.append(f"| SIM-03 | User C 429 graceful | {'PASS' if sim03 else 'FAIL'} |")
+
+    # SIM-04: All 17 obstacle courses
+    sim04 = len(S.obstacle_completions) == 17 and all(S.obstacle_completions.values())
+    lines.append(
+        f"| SIM-04 | 17/17 obstacle courses | {'PASS' if sim04 else 'FAIL'} "
+        f"({sum(S.obstacle_completions.values())}/{len(S.obstacle_completions)}) |"
+    )
+
+    # SIM-05: Zero 500 errors
+    sim05 = len(S.server_errors) == 0
+    lines.append(f"| SIM-05 | Zero 500 errors | {'PASS' if sim05 else 'FAIL'} ({len(S.server_errors)} errors) |")
+
+    # SIM-06: Onboarding under 5 min
+    sim06 = all(t < 300 for t in S.onboarding_times.values()) if S.onboarding_times else False
+    lines.append(f"| SIM-06 | Onboarding < 5 min | {'PASS' if sim06 else 'FAIL'} |")
+
+    # Onboarding times
+    lines.append("\n## Onboarding Times\n")
+    for user, elapsed in sorted(S.onboarding_times.items()):
+        lines.append(
+            f"- **{user}:** {elapsed:.1f}s {'(PASS)' if elapsed < 300 else '(FAIL -- over 5 min)'}"
+        )
+
+    # Obstacle Course Results
+    lines.append("\n## Obstacle Course Results\n")
+    lines.append("| Agent | Completed |")
+    lines.append("|-------|-----------|")
+    for ag, ok in sorted(S.obstacle_completions.items()):
+        lines.append(f"| {ag} | {'Yes' if ok else 'No'} |")
+
+    # Server Errors (SIM-05)
+    if S.server_errors:
+        lines.append("\n## Server Errors (SIM-05 FAIL)\n")
+        for e in S.server_errors[:20]:
+            lines.append(
+                f"- [{e['agent']}] {e['method']} {e['path']} -> {e['status']}: {e['body'][:100]}"
+            )
+
+    # Monitoring Stats
+    lines.append("\n## Monitoring Loop\n")
+    lines.append(f"- **Duration:** {S.monitoring_duration:.0f}s")
+    lines.append(f"- **Iterations:** {S.monitoring_iterations}")
+
+    # Test Results Summary
+    passed = sum(1 for res in S.results if res.passed)
+    total = len(S.results)
+    lines.append(f"\n## Test Results: {passed}/{total} passed\n")
+    for res in S.results:
+        icon = "PASS" if res.passed else "FAIL"
+        lines.append(f"- [{icon}] {res.user}/{res.agent}: {res.test} -- {res.detail}")
+
+    # Final verdict
+    all_pass = sim01 and sim02 and sim03 and sim04 and sim05 and sim06
+    lines.append(f"\n## Final Verdict: {'ALL PASS' if all_pass else 'FAILURES DETECTED'}\n")
+
+    return "\n".join(lines)
+
+
+# ===========================================================================
 # MAIN ENTRY POINT
 # ===========================================================================
 
 async def main() -> None:
-    print("Phase 79: 3-User Realistic Simulation")
-    print(f"Mode: {'QUICK (User C only)' if QUICK_MODE else 'FULL (all 3 users)'}")
-    print(f"API: {API}")
-    print()
-
     S.start_time = time.time()
+    print("=" * 70)
+    print("Phase 79: 3-User Realistic Simulation")
+    print(f"API: {API}")
+    print(f"Mode: {'Quick' if QUICK_MODE else 'Full'}")
+    print("=" * 70)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Phase 0: Register all simulation agents
-        print("Registering simulation agents...")
+        # Phase 0: Register all 17 agents
+        print("\n--- Phase 0: Agent Registration ---")
         await register_simulation_agents(client)
+        print(f"Registered {len(S.registered_agents)} agents")
 
-        agent_count = len(S.registered_agents)
-        print(f"Registered {agent_count} agents")
-        if not QUICK_MODE:
-            print(f"Expected: 17 agents")
-        print()
+        if QUICK_MODE:
+            # Quick mode: User C only
+            print("\n--- Quick Mode: User C Only ---")
+            await run_user_c(client)
+        else:
+            # Full mode: All 3 users concurrently
+            print("\n--- Phase 1: User Simulations (concurrent) ---")
+            await asyncio.gather(
+                run_user_a(client),
+                run_user_b(client),
+                run_user_c(client),
+            )
 
-        # Phase 1: User persona workflows (Plan 02)
-        # TODO: Wire user persona workflows here in Plan 02
+    # Generate report
+    print("\n--- Generating Report ---")
+    report = generate_report()
 
-        # Placeholder: run User C obstacle course as a smoke test
-        if QUICK_MODE and "SimC_Free_01" in S.registered_agents:
-            print("Quick mode: running User C obstacle course only...")
-            await run_obstacle_course(client, "SimC_Free_01", BUDGET_FREE, "UserC")
+    # Write report to planning directory
+    report_path = Path(".planning/phases/79-3-user-realistic-simulation/79-SIM-RESULTS.md")
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report)
+    print(f"Report written to {report_path}")
 
-        print()
-        print("Framework loaded. Obstacle course stages ready.")
-        print(f"Server errors: {len(S.server_errors)}")
-        print(f"Obstacle completions: {sum(1 for v in S.obstacle_completions.values() if v)} / {len(S.obstacle_completions)}")
+    # Also write to Downloads if it exists
+    downloads = Path.home() / "Downloads" / "sim-3user-report.md"
+    try:
+        downloads.write_text(report)
+        print(f"Report written to {downloads}")
+    except OSError:
+        pass
+
+    # Print summary
+    print("\n" + "=" * 70)
+    print(report)
+    print("=" * 70)
+
+    # Exit code based on SIM-05 (zero 500 errors)
+    if S.server_errors:
+        print(f"\nEXIT 1: {len(S.server_errors)} server errors detected")
+        sys.exit(1)
+    else:
+        print("\nEXIT 0: Zero server errors")
 
 
 if __name__ == "__main__":
