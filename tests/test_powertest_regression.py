@@ -939,4 +939,169 @@ def test_tsk03_priority_valid_integer_succeeds(agent_a):
 # Tests added by Phase 62 executor (Playwright-based, separate file).
 # ═══════════════════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PHASE 75: Critical Security + Queue Fixes
+# Tests added by Phase 75 executor (SEC-01, SEC-02, SEC-05, SEC-06, SEC-07).
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_sec01_queue_claim_200():
+    """SEC-01: Queue claim returns 200 with job JSON, not 500."""
+    agent_id, api_key, headers = _create_agent("sec01-queue-claim")
+    # Submit a job first
+    resp = client.post("/v1/queue/submit", json={
+        "queue_name": "test_q",
+        "payload": {"task": "sec01_test"},
+    }, headers=headers)
+    assert resp.status_code == 200, f"Submit failed: {resp.text}"
+    # Claim the job
+    resp = client.post("/v1/queue/claim", params={"queue_name": "test_q"}, headers=headers)
+    assert resp.status_code == 200, f"Claim failed with {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert "job_id" in data, f"Missing job_id in response: {data}"
+    assert data.get("claimed_by") == agent_id
+
+
+def test_sec02_queue_complete_200():
+    """SEC-02: Queue complete returns 200, not 405."""
+    agent_id, api_key, headers = _create_agent("sec02-queue-complete")
+    # Submit + claim
+    resp = client.post("/v1/queue/submit", json={
+        "queue_name": "test_q2",
+        "payload": {"task": "sec02_test"},
+    }, headers=headers)
+    assert resp.status_code == 200
+    resp = client.post("/v1/queue/claim", params={"queue_name": "test_q2"}, headers=headers)
+    assert resp.status_code == 200
+    claimed_job_id = resp.json()["job_id"]
+    # Complete the job -- POST /v1/queue/{job_id}/complete
+    resp = client.post(f"/v1/queue/{claimed_job_id}/complete", json={"result": "done"}, headers=headers)
+    assert resp.status_code == 200, f"Complete failed with {resp.status_code}: {resp.text}"
+    assert resp.json()["status"] == "completed"
+
+
+def test_sec05_chat_gateway_key_validation():
+    """SEC-05: Chat gateway rejects XSS/SQLi/path-traversal keys."""
+    agent_id, api_key, headers = _create_agent("sec05-chat-key")
+    # Path traversal
+    resp = client.get("/v1/chat/memory/set", params={"key": api_key, "k": "../../../etc/passwd", "v": "test"})
+    assert resp.status_code == 422, f"Path traversal not rejected: {resp.status_code}"
+    # XSS in key
+    resp = client.get("/v1/chat/memory/set", params={"key": api_key, "k": "<script>alert(1)</script>", "v": "test"})
+    assert resp.status_code == 422, f"XSS key not rejected: {resp.status_code}"
+    # SQLi in key
+    resp = client.get("/v1/chat/memory/set", params={"key": api_key, "k": "'; DROP TABLE memory;--", "v": "test"})
+    assert resp.status_code == 422, f"SQLi key not rejected: {resp.status_code}"
+    # Valid key should work
+    resp = client.get("/v1/chat/memory/set", params={"key": api_key, "k": "valid_key_123", "v": "test_value"})
+    assert resp.status_code == 200, f"Valid key rejected: {resp.status_code}: {resp.text}"
+    # Verify get also validates
+    resp = client.get("/v1/chat/memory/get", params={"key": api_key, "k": "<script>alert(1)</script>"})
+    assert resp.status_code == 422, f"XSS key not rejected on get: {resp.status_code}"
+
+
+def test_sec06_chat_relay_inbox_200():
+    """SEC-06: Chat relay inbox returns 200 with messages, not 500."""
+    agent_id, api_key, headers = _create_agent("sec06-relay-inbox")
+    resp = client.get("/v1/chat/relay/inbox", params={"key": api_key})
+    assert resp.status_code == 200, f"Inbox failed with {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert "messages" in data, f"Missing messages key: {data}"
+    assert "count" in data
+
+
+def test_sec07_internal_namespace_blocked():
+    """SEC-07: __internal__ namespace prefix blocked on writes."""
+    agent_id, api_key, headers = _create_agent("sec07-internal-ns")
+    # Standard memory -- __internal__ key should be blocked
+    resp = client.post("/v1/memory", json={
+        "key": "__internal__secret",
+        "value": "should_be_blocked",
+    }, headers=headers)
+    assert resp.status_code == 403, f"__internal__ key not blocked: {resp.status_code}: {resp.text}"
+    # Chat gateway -- __internal__ key should also be blocked
+    resp = client.get("/v1/chat/memory/set", params={
+        "key": api_key, "k": "__internal__secret", "v": "should_be_blocked",
+    })
+    assert resp.status_code == 403, f"__internal__ key not blocked in chat: {resp.status_code}"
+
 # OPS-01 through OPS-04: Visual tests in tests/test_ops_center_e2e.py
+
+
+# SEC-03 (BOLA): Cross-account task claim returns 404
+# SEC-04 (Ownership): Shared-memory namespace ownership bypass blocked
+
+
+def test_sec03_cross_account_task_claim_404():
+    """SEC-03: Cross-account task claim returns 404, not 200."""
+    # Create agent A (account 1)
+    agent_a_id, agent_a_key, headers_a = _create_agent("sec03-owner-a")
+
+    # Create agent B with same registration, then set to a different owner_id
+    agent_b_id, agent_b_key, headers_b = _create_agent("sec03-owner-b")
+
+    # Update agent B's owner_id to a different account via direct DB access
+    db_path = os.environ.get("MOLTGRID_DB", "test_moltgrid.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("UPDATE agents SET owner_id='different_account_999' WHERE agent_id=?", (agent_b_id,))
+    conn.commit()
+    conn.close()
+
+    # Agent A creates a task
+    resp = client.post("/v1/tasks", json={
+        "title": "SEC-03 test task",
+        "description": "Cross-account BOLA test",
+    }, headers=headers_a)
+    assert resp.status_code == 200, f"Task create failed: {resp.text}"
+    task_id = resp.json()["task_id"]
+
+    # Agent B (different account) tries to claim it -- should get 404
+    resp = client.post(f"/v1/tasks/{task_id}/claim", headers=headers_b)
+    assert resp.status_code == 404, (
+        f"SEC-03 FAIL: cross-account claim should return 404, got {resp.status_code}: {resp.text}"
+    )
+
+    # Agent A (same account) should be able to claim it -- should get 200 or 409
+    resp = client.post(f"/v1/tasks/{task_id}/claim", headers=headers_a)
+    assert resp.status_code in (200, 409), (
+        f"SEC-03 FAIL: same-account claim failed: {resp.status_code}: {resp.text}"
+    )
+
+
+def test_sec04_shared_memory_non_owner_403():
+    """SEC-04: Shared-memory write from non-owner agent returns 403."""
+    # Create two agents
+    agent_a_id, agent_a_key, headers_a = _create_agent("sec04-agent-a")
+    agent_b_id, agent_b_key, headers_b = _create_agent("sec04-agent-b")
+
+    # Use a unique namespace to avoid collisions with parallel tests
+    ns = f"sec04_ns_{uuid.uuid4().hex[:8]}"
+
+    # Agent A writes to the namespace (becomes the owner)
+    resp = client.post("/v1/shared-memory", json={
+        "namespace": ns,
+        "key": "first_key",
+        "value": "agent_a_data",
+    }, headers=headers_a)
+    assert resp.status_code == 200, f"Agent A write failed: {resp.text}"
+
+    # Agent B tries to write to the same namespace -- should get 403
+    resp = client.post("/v1/shared-memory", json={
+        "namespace": ns,
+        "key": "second_key",
+        "value": "agent_b_data",
+    }, headers=headers_b)
+    assert resp.status_code == 403, (
+        f"SEC-04 FAIL: non-owner write should return 403, got {resp.status_code}: {resp.text}"
+    )
+
+    # Agent A can still write to the same namespace (owner)
+    resp = client.post("/v1/shared-memory", json={
+        "namespace": ns,
+        "key": "another_key",
+        "value": "more_data",
+    }, headers=headers_a)
+    assert resp.status_code == 200, (
+        f"SEC-04 FAIL: owner write failed: {resp.status_code}: {resp.text}"
+    )
