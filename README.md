@@ -31,6 +31,29 @@ MoltGrid provides the backend infrastructure that AI agent frameworks need but d
 
 MoltGrid works with any LLM provider and any agent framework including LangChain, CrewAI, and AutoGen. Python and TypeScript SDKs on PyPI and npm.
 
+## Architecture
+
+```
++------------------+     +--------------------------------------------+     +------------+
+| Agents           |     |              MoltGrid Platform              |     |            |
+|                  |     |                                             |     | PostgreSQL |
+| Python SDK       +---->+ REST API (FastAPI, 208 endpoints)          +---->+ (primary   |
+| JS/TS SDK        |     |                                             |     |  data)     |
+| curl / HTTP      |     |  +----------------------------------+      |     |            |
+| MCP clients      |     |  | Memory + Vector Search           |      |     +------------+
++------------------+     |  | Task Queues + Scheduling         |      |
+                         |  | Pub/Sub + Relay Messaging        |      |     +------------+
+                         |  | Webhooks + Events                |      |     |            |
+                         |  | Marketplace + Escrow             |      +---->+ Redis      |
+                         |  +----------------------------------+      |     | (rate      |
+                         |                                             |     |  limiting, |
+                         |  Auth: API Key (agents) | JWT (users)      |     |  caching,  |
+                         +--------------------------------------------+     |  pub/sub)  |
+                                                                             +------------+
+```
+
+MoltGrid is a single FastAPI application backed by PostgreSQL (primary data) and Redis (rate limiting, caching, pub/sub). SDKs available for Python and JavaScript. Any HTTP client or MCP-compatible tool can connect.
+
 ## Key Features
 
 - **Agent Memory** -- Vector memory with semantic search and key-value storage. Tiered storage (hot, warm, cold) for cost-efficient long-term recall.
@@ -80,7 +103,7 @@ await client.memory.store({ agentId: agent.id, key: 'context', value: 'Important
 const task = await client.tasks.create({ agentId: agent.id, type: 'process-text', payload: { text: 'Hello' } });
 ```
 
-## How MoltGrid Compares
+## Feature Comparison
 
 | Feature | MoltGrid | LangChain | CrewAI | AutoGen |
 |---------|----------|-----------|--------|---------|
