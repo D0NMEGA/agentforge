@@ -35,6 +35,8 @@ def _validate_key(key: str):
         raise HTTPException(422, "Key must be 1-256 characters: letters, digits, underscore, hyphen, dot only")
     if '..' in key:
         raise HTTPException(422, "Key must not contain path traversal sequences")
+    if key.startswith("__internal__"):
+        raise HTTPException(403, "Reserved key prefix")
 
 
 router = APIRouter()

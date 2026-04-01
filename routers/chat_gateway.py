@@ -10,6 +10,7 @@ Chat Gateway (/v1/chat/*)  -> for web-based LLM chat sessions
 """
 
 import json
+import re as _re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,6 +23,18 @@ from helpers import hash_key, _encrypt, _decrypt, _sanitize_text, _fire_webhooks
 from config import logger
 
 from rate_limit import limiter, make_tier_limit
+
+_VALID_KEY_PATTERN = _re.compile(r'^[a-zA-Z0-9_\-\.:]{1,256}$')
+
+
+def _validate_key(key: str):
+    """Reject path traversal and special chars in memory keys."""
+    if not _VALID_KEY_PATTERN.match(key):
+        raise HTTPException(422, "Key must be 1-256 characters: letters, digits, underscore, hyphen, dot only")
+    if '..' in key:
+        raise HTTPException(422, "Key must not contain path traversal sequences")
+    if key.startswith("__internal__"):
+        raise HTTPException(403, "Reserved key prefix")
 
 router = APIRouter(tags=["Chat Gateway"])
 
@@ -101,8 +114,7 @@ def chat_heartbeat(request: Request,
     status: str = Query("online", description="Agent status"),
 ):
     """Send a heartbeat. Call periodically to stay online."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         db.execute(
@@ -118,8 +130,7 @@ def chat_heartbeat(request: Request,
 @limiter.limit(make_tier_limit("agent_read"))
 def chat_whoami(request: Request, key: str = Query(..., description="API key")):
     """Get your agent profile."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
     with get_db() as db:
         row = db.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
     if not row:
@@ -148,8 +159,8 @@ def chat_memory_set(request: Request,
     ns: str = Query("default", description="Namespace"),
 ):
     """Store a key-value pair in agent memory."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
+    _validate_key(k)
     now = datetime.now(timezone.utc).isoformat()
     enc_value = _encrypt(v)
     with get_db() as db:
@@ -172,8 +183,8 @@ def chat_memory_get(request: Request,
     ns: str = Query("default", description="Namespace"),
 ):
     """Retrieve a value from agent memory."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
+    _validate_key(k)
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
         row = db.execute(
@@ -196,8 +207,7 @@ def chat_relay_send(request: Request,
     channel: str = Query("direct", description="Channel name"),
 ):
     """Send a message to another agent."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
     message_id = f"msg_{uuid.uuid4().hex[:16]}"
     now = datetime.now(timezone.utc).isoformat()
     with get_db() as db:
@@ -229,11 +239,10 @@ def chat_relay_inbox(request: Request,
     limit: int = Query(20, ge=1, le=50, description="Max messages"),
 ):
     """Check your message inbox."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
     with get_db() as db:
         rows = db.execute(
-            "SELECT message_id, from_agent, channel, payload, created_at, read "
+            "SELECT message_id, from_agent, channel, payload, created_at "
             "FROM relay WHERE to_agent=? AND channel=? ORDER BY created_at DESC LIMIT ?",
             (agent_id, channel, limit)
         ).fetchall()
@@ -257,8 +266,7 @@ def chat_directory_update(request: Request,
     public: bool = Query(True, description="Public listing"),
 ):
     """Update your directory profile."""
-    request_stub = type("R", (), {"state": type("S", (), {})(), "headers": {}})()
-    agent_id = _chat_auth(key, request_stub)
+    agent_id = _chat_auth(key, request)
     skills_list = [s.strip() for s in skills.split(",") if s.strip()] if skills else None
     caps_list = [c.strip() for c in capabilities.split(",") if c.strip()] if capabilities else None
     skills_json = json.dumps(skills_list) if skills_list else None

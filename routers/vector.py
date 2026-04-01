@@ -195,6 +195,8 @@ def shared_memory_set(request: Request, req: SharedMemorySetRequest, agent_id: s
     ns_lower = req.namespace.lower()
     if ns_lower.startswith("agent:") or ns_lower.startswith("system:"):
         raise HTTPException(403, "Reserved namespace prefix")
+    if ns_lower.startswith("__internal__"):
+        raise HTTPException(403, "Reserved namespace prefix")
     now = datetime.now(timezone.utc)
     expires = None
     if req.ttl_seconds:

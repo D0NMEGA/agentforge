@@ -81,17 +81,7 @@ def queue_status(request: Request, job_id: str, agent_id: str = Depends(get_agen
 
 @router.post("/v1/queue/claim", tags=["Queue"])
 @limiter.limit(make_tier_limit("agent_write"))
-async def queue_claim(request: Request, queue_name: str = Query("default"), agent_id: str = Depends(get_agent_id)):
-    # Accept queue_name from body JSON (body takes priority over query param)
-    try:
-        body_bytes = await request.body()
-        if body_bytes:
-            import json as _json
-            body = _json.loads(body_bytes)
-            if isinstance(body, dict) and "queue_name" in body:
-                queue_name = body["queue_name"]
-    except Exception:
-        pass
+def queue_claim(request: Request, queue_name: str = Query("default"), agent_id: str = Depends(get_agent_id)):
     now = datetime.now(timezone.utc).isoformat()
     cutoff = (datetime.now(timezone.utc) - timedelta(seconds=86400)).strftime("%Y-%m-%dT%H:%M:%S")
     with get_db() as db:
