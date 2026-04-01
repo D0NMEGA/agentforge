@@ -1035,18 +1035,21 @@ def test_sec07_internal_namespace_blocked():
 
 def test_sec03_cross_account_task_claim_404():
     """SEC-03: Cross-account task claim returns 404, not 200."""
+    import db as _db_module
+
     # Create agent A (account 1)
     agent_a_id, agent_a_key, headers_a = _create_agent("sec03-owner-a")
 
     # Create agent B with same registration, then set to a different owner_id
     agent_b_id, agent_b_key, headers_b = _create_agent("sec03-owner-b")
 
-    # Update agent B's owner_id to a different account via direct DB access
-    db_path = os.environ.get("MOLTGRID_DB", "test_moltgrid.db")
-    conn = sqlite3.connect(db_path)
-    conn.execute("UPDATE agents SET owner_id='different_account_999' WHERE agent_id=?", (agent_b_id,))
-    conn.commit()
-    conn.close()
+    # Update agent B's owner_id to a different account using the app's own DB layer
+    # to ensure the change is visible to subsequent requests through the same connection path
+    with _db_module.get_db() as db:
+        db.execute(
+            "UPDATE agents SET owner_id='different_account_999' WHERE agent_id=?",
+            (agent_b_id,)
+        )
 
     # Agent A creates a task
     resp = client.post("/v1/tasks", json={
